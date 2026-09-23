@@ -1,6 +1,13 @@
+"use client";
+
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { Employee } from "@/lib/app-types";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
+import {
+  filterOptionLabel,
+  translateStatus,
+  useT,
+} from "@/lib/i18n";
 import { leaveTypeTone } from "@/lib/map-rows";
 
 export const TABLE_PAGE_SIZE = 8;
@@ -95,6 +102,7 @@ export function Logo({ dark = false }: { dark?: boolean }) {
 }
 
 export function Status({ status }: { status: string }) {
+  const t = useT();
   const tone =
     status === "Pending"
       ? "status-pending"
@@ -104,7 +112,7 @@ export function Status({ status }: { status: string }) {
   return (
     <span className={`status-pill ${tone}`}>
       <span className="status-dot" />
-      {status}
+      {translateStatus(t, status)}
     </span>
   );
 }
@@ -240,8 +248,9 @@ export function RequestTabs({
   value: "leaves" | "authorizations";
   onChange: (value: "leaves" | "authorizations") => void;
 }) {
+  const t = useT();
   return (
-    <div className="request-tabs" role="tablist" aria-label="Request type">
+    <div className="request-tabs" role="tablist" aria-label={t("tabs.aria")}>
       <button
         type="button"
         role="tab"
@@ -249,7 +258,7 @@ export function RequestTabs({
         className={value === "leaves" ? "is-active" : undefined}
         onClick={() => onChange("leaves")}
       >
-        Leaves
+        {t("tabs.leaves")}
       </button>
       <button
         type="button"
@@ -258,7 +267,7 @@ export function RequestTabs({
         className={value === "authorizations" ? "is-active" : undefined}
         onClick={() => onChange("authorizations")}
       >
-        Authorizations
+        {t("tabs.authorizations")}
       </button>
     </div>
   );
@@ -273,14 +282,13 @@ export function Header({
   title: string;
   action: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <section className="welcome-row compact">
       <div>
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
-        <p className="page-subtitle">
-          Keep your team, time off, and policies in one place.
-        </p>
+        <p className="page-subtitle">{t("header.subtitle")}</p>
       </div>
       {action}
     </section>
@@ -311,6 +319,13 @@ export function FilterBar({
   setEndDate?: (value: string) => void;
   onReset?: () => void;
 }) {
+  const t = useT();
+  const filterLabel = (label?: string) => {
+    if (label === "Status") return t("filter.status");
+    if (label === "Leave type") return t("filter.leaveType");
+    if (label === "Department") return t("filter.department");
+    return label;
+  };
   return (
     <div className="filter-bar">
       <div className="search-field">
@@ -318,19 +333,21 @@ export function FilterBar({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search..."
+          placeholder={t("filter.search")}
         />
       </div>
       {filters.map((filter, index) => (
         <select
           key={index}
           className="filter-select"
-          aria-label={filter.label}
+          aria-label={filterLabel(filter.label)}
           value={filter.value}
           onChange={(e) => filter.setValue(e.target.value)}
         >
           {filter.options.map((option) => (
-            <option key={option}>{option}</option>
+            <option key={option} value={option}>
+              {filterOptionLabel(t, option)}
+            </option>
           ))}
         </select>
       ))}
@@ -344,7 +361,7 @@ export function FilterBar({
       )}
       {onReset && (
         <button type="button" className="secondary-button" onClick={onReset}>
-          Reset
+          {t("common.reset")}
         </button>
       )}
     </div>
@@ -366,17 +383,16 @@ export function Pagination({
   end: number;
   onPage: (page: number) => void;
 }) {
+  const t = useT();
   if (total === 0) return null;
 
   return (
     <div className="table-pagination">
-      <span>
-        {start}–{end} of {total}
-      </span>
+      <span>{t("pagination.range", { start, end, total })}</span>
       <div className="table-pagination-pages">
         <button
           type="button"
-          aria-label="Previous page"
+          aria-label={t("pagination.previous")}
           disabled={page <= 1}
           onClick={() => onPage(page - 1)}
         >
@@ -398,7 +414,7 @@ export function Pagination({
         )}
         <button
           type="button"
-          aria-label="Next page"
+          aria-label={t("pagination.next")}
           disabled={page >= pageCount}
           onClick={() => onPage(page + 1)}
         >

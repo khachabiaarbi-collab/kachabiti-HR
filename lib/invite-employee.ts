@@ -9,13 +9,48 @@ function isStaff(role: string | null | undefined) {
   return role === "admin" || role === "manager";
 }
 
+function firstHeader(headerList: Headers, name: string) {
+  return headerList.get(name)?.split(",")[0]?.trim() ?? "";
+}
+
+function configuredSiteUrl() {
+  for (const value of [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.SITE_URL,
+    process.env.URL,
+  ]) {
+    const url = value?.trim().replace(/\/$/, "");
+    if (url?.startsWith("http://") || url?.startsWith("https://")) return url;
+  }
+  return null;
+}
+
+function httpsOrigin(value: string) {
+  const url = new URL(value);
+  const local =
+    url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (!local && url.protocol === "http:") url.protocol = "https:";
+  return url.origin;
+}
+
 function appOrigin(headerList: Headers) {
-  const origin = headerList.get("origin");
-  if (origin) return origin;
-  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
-  if (!host) return "http://localhost:3000";
-  const proto = headerList.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
+  const configured = configuredSiteUrl();
+  if (configured) return httpsOrigin(configured);
+
+  const origin = firstHeader(headerList, "origin");
+  if (origin) return httpsOrigin(origin);
+
+  const host =
+    firstHeader(headerList, "x-forwarded-host") || firstHeader(headerList, "host");
+  if (!host) {
+    return process.env.NODE_ENV === "production"
+      ? "https://kachabiti-hr.netlify.app"
+      : "http://localhost:3000";
+  }
+  const local = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  const proto =
+    firstHeader(headerList, "x-forwarded-proto") || (local ? "http" : "https");
+  return httpsOrigin(`${proto}://${host}`);
 }
 
 export async function inviteEmployee(input: {
@@ -59,7 +94,12 @@ export async function inviteEmployee(input: {
       data: { full_name: name },
       redirectTo: `${origin}/reset-password?welcome=1`,
     });
-    if (error) return error.message;
+    if (error) {
+      if (/redirect/i.test(error.message)) {
+        return "Invite email blocked. Add the live site to Supabase Auth redirect URLs.";
+      }
+      return error.message;
+    }
     if (!data.user) return "Could not invite employee";
     const userId = data.user.id;
     const userEmail = data.user.email ?? email;

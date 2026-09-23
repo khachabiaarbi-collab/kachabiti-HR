@@ -1,5 +1,6 @@
--- Run in the SQL editor. In-app bell notices for leave requests and
--- authorizations (submit / approve / reject), one row per recipient.
+-- Run in the SQL editor. In-app bell notices for leave requests,
+-- authorizations, and attendance corrections (submit / approve / reject),
+-- one row per recipient.
 
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
@@ -32,6 +33,9 @@ alter table public.notifications
 alter table public.notifications
   add column if not exists authorization_id uuid;
 
+alter table public.notifications
+  add column if not exists attendance_correction_id uuid;
+
 do $$
 begin
   if to_regclass('public.authorizations') is not null then
@@ -39,6 +43,18 @@ begin
       alter table public.notifications
         add constraint notifications_authorization_id_fkey
         foreign key (authorization_id) references public.authorizations (id) on delete cascade;
+    exception
+      when duplicate_object then null;
+    end;
+  end if;
+
+  if to_regclass('public.attendance_correction_requests') is not null then
+    begin
+      alter table public.notifications
+        add constraint notifications_attendance_correction_id_fkey
+        foreign key (attendance_correction_id)
+        references public.attendance_correction_requests (id)
+        on delete cascade;
     exception
       when duplicate_object then null;
     end;
@@ -202,6 +218,17 @@ begin
     after insert or update of status on public.authorizations
     for each row
     execute function public.notify_authorization();
+  end if;
+
+  if to_regclass('public.attendance_correction_requests') is not null
+    and to_regproc('public.notify_attendance_correction()') is not null
+  then
+    drop trigger if exists attendance_corrections_notify
+      on public.attendance_correction_requests;
+    create trigger attendance_corrections_notify
+    after insert or update of status on public.attendance_correction_requests
+    for each row
+    execute function public.notify_attendance_correction();
   end if;
 end;
 $$;

@@ -161,11 +161,14 @@ export function displayValue(value: string | null | undefined) {
   return trimmed ? trimmed : "—";
 }
 
-export function formatDisplayDate(iso: string | null | undefined) {
+export function formatDisplayDate(
+  iso: string | null | undefined,
+  locale = "en-US",
+) {
   if (!iso) return "—";
   const date = parseDay(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -212,6 +215,7 @@ export function mapDepartment(
     id: row.id,
     name: row.name,
     manager,
+    managerId: row.manager_id,
     count,
   };
 }
@@ -655,6 +659,7 @@ export type NotificationRow = {
   created_at: string;
   leave_request_id?: string | null;
   authorization_id?: string | null;
+  attendance_correction_id?: string | null;
 };
 
 export function mapNotice(row: NotificationRow): Notice {
@@ -667,6 +672,7 @@ export function mapNotice(row: NotificationRow): Notice {
     createdAt: row.created_at,
     leaveRequestId: row.leave_request_id ?? null,
     authorizationId: row.authorization_id ?? null,
+    attendanceCorrectionId: row.attendance_correction_id ?? null,
   };
 }
 

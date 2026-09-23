@@ -12,7 +12,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { Logo } from "@/components/primitives";
+import { useT } from "@/lib/i18n";
 
 function homeForRole(role: string | null | undefined) {
   return role === "admin" || role === "manager" ? "/admin" : "/dashboard";
@@ -78,17 +80,16 @@ export function AuthScreen({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const err = params.get("error");
     if (err === "profile") {
-      setError(
-        "No employee profile found for this account. Ask an admin to add you, then sign in again.",
-      );
+      setError(t("auth.noProfile"));
     }
     if (err === "auth") {
-      setError("Could not complete sign-in. Try again.");
+      setError(t("auth.signInFailed"));
     }
     if (path === "/reset-password") {
       void applyInviteSessionFromUrl();
@@ -127,16 +128,16 @@ export function AuthScreen({
           setError(resetError.message);
           return;
         }
-        setMessage("Check your email for a reset link.");
+        setMessage(t("auth.resetSent"));
         return;
       }
 
       if (password !== confirm) {
-        setError("Passwords do not match.");
+        setError(t("auth.passwordMismatch"));
         return;
       }
       if (password.length < 8) {
-        setError("Use at least 8 characters.");
+        setError(t("auth.passwordShort"));
         return;
       }
 
@@ -158,18 +159,18 @@ export function AuthScreen({
 
   const title =
     path === "/forgot-password"
-      ? "Reset your password"
+      ? t("auth.forgotTitle")
       : path === "/reset-password"
-        ? "Create a new password"
-        : "Sign in to Kachabiti HR";
+        ? t("auth.resetTitle")
+        : t("auth.signInTitle");
 
   const actionLabel = busy
-    ? "Please wait…"
+    ? t("auth.pleaseWait")
     : path === "/forgot-password"
-      ? "Send reset link"
+      ? t("auth.sendReset")
       : path === "/reset-password"
-        ? "Update password"
-        : "Sign in";
+        ? t("auth.updatePassword")
+        : t("auth.signIn");
 
   return (
     <div className="auth-shell">
@@ -179,28 +180,23 @@ export function AuthScreen({
         </div>
         <div className="auth-showcase-copy">
           <span className="auth-showcase-badge">
-            <ShieldCheck size={14} /> Secure HR workspace
+            <ShieldCheck size={14} /> {t("auth.secure")}
           </span>
-          <h2>Time off, organized for everyone.</h2>
-          <p>
-            A clear place for your team to request leave, manage approvals,
-            and stay aligned.
-          </p>
+          <h2>{t("auth.showcaseTitle")}</h2>
+          <p>{t("auth.showcaseBody")}</p>
           <ul>
             <li>
-              <Check size={15} /> Track leave and authorization balances
+              <Check size={15} /> {t("auth.feature1")}
             </li>
             <li>
-              <Check size={15} /> Review requests without losing context
+              <Check size={15} /> {t("auth.feature2")}
             </li>
             <li>
-              <Check size={15} /> Keep the whole team calendar visible
+              <Check size={15} /> {t("auth.feature3")}
             </li>
           </ul>
         </div>
-        <p className="auth-showcase-footer">
-          Kachabiti · Leave management for modern teams
-        </p>
+        <p className="auth-showcase-footer">{t("auth.footer")}</p>
       </aside>
 
       <main className="auth-main">
@@ -208,20 +204,23 @@ export function AuthScreen({
           <Logo />
         </div>
         <form className="auth-card" onSubmit={submit}>
+          <div className="auth-lang">
+            <LanguageSwitcher compact />
+          </div>
           <div className="auth-card-head">
             <div className="auth-icon">
               {recovery ? <KeyRound size={20} /> : <ShieldCheck size={20} />}
             </div>
             <p className="eyebrow">
-              {recovery ? "Account recovery" : "Welcome back"}
+              {recovery ? t("auth.recovery") : t("auth.welcome")}
             </p>
             <h1>{title}</h1>
             <p>
               {path === "/forgot-password"
-                ? "Enter your work email and we’ll send you a secure reset link."
+                ? t("auth.forgotSubtitle")
                 : path === "/reset-password"
-                  ? "Choose a secure password with at least 8 characters."
-                  : "Enter your work credentials to access your workspace."}
+                  ? t("auth.resetSubtitle")
+                  : t("auth.signInSubtitle")}
             </p>
           </div>
 
@@ -229,7 +228,7 @@ export function AuthScreen({
             {path !== "/reset-password" && (
               <div className="auth-field">
                 <span>
-                  <label htmlFor="auth-email">Work email</label>
+                  <label htmlFor="auth-email">{t("auth.workEmail")}</label>
                 </span>
                 <div className="auth-input">
                   <Mail size={17} />
@@ -238,7 +237,7 @@ export function AuthScreen({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    placeholder="name@kachabiti.com"
+                    placeholder={t("auth.emailPlaceholder")}
                     autoComplete="email"
                     required
                   />
@@ -251,15 +250,15 @@ export function AuthScreen({
                 <span>
                   <label htmlFor="auth-password">
                     {path === "/reset-password"
-                      ? "New password"
-                      : "Password"}
+                      ? t("auth.newPassword")
+                      : t("auth.password")}
                   </label>
                   {path === "/login" && (
                     <button
                       type="button"
                       onClick={() => navigate("/forgot-password")}
                     >
-                      Forgot password?
+                      {t("auth.forgotLink")}
                     </button>
                   )}
                 </span>
@@ -272,8 +271,8 @@ export function AuthScreen({
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder={
                       path === "/reset-password"
-                        ? "At least 8 characters"
-                        : "Enter your password"
+                        ? t("auth.newPasswordPlaceholder")
+                        : t("auth.passwordPlaceholder")
                     }
                     autoComplete={
                       path === "/login" ? "current-password" : "new-password"
@@ -285,7 +284,7 @@ export function AuthScreen({
                     type="button"
                     className="auth-password-toggle"
                     aria-label={
-                      showPassword ? "Hide password" : "Show password"
+                      showPassword ? t("auth.hidePassword") : t("auth.showPassword")
                     }
                     onClick={() => setShowPassword((visible) => !visible)}
                   >
@@ -299,7 +298,7 @@ export function AuthScreen({
               <div className="auth-field">
                 <span>
                   <label htmlFor="auth-password-confirm">
-                    Confirm password
+                    {t("auth.confirmPassword")}
                   </label>
                 </span>
                 <div className="auth-input">
@@ -309,7 +308,7 @@ export function AuthScreen({
                     type={showPassword ? "text" : "password"}
                     value={confirm}
                     onChange={(event) => setConfirm(event.target.value)}
-                    placeholder="Repeat your new password"
+                    placeholder={t("auth.confirmPlaceholder")}
                     autoComplete="new-password"
                     minLength={8}
                     required
@@ -339,12 +338,12 @@ export function AuthScreen({
               className="back-link"
               onClick={() => navigate("/login")}
             >
-              <ArrowLeft size={14} /> Back to sign in
+              <ArrowLeft size={14} /> {t("auth.back")}
             </button>
           )}
 
           <p className="auth-help">
-            Need access? Contact your Kachabiti HR administrator.
+            {t("auth.help")}
           </p>
         </form>
       </main>
