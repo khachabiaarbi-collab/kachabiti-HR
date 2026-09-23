@@ -22,6 +22,10 @@ import type {
 } from "@/lib/app-types";
 import { Calendar } from "@/components/admin-views";
 import {
+  AttendanceOverviewCard,
+  EmployeeTimeClock,
+} from "@/components/attendance-views";
+import {
   AuthorizationDetail,
   ConfirmModal,
   RequestDetail,
@@ -61,17 +65,22 @@ import {
   requestedLeaveDays,
 } from "@/lib/map-rows";
 import { uploadEmployeeAvatar } from "@/lib/employee-avatar";
+import { translateRole, translateStatus, useLanguage, useT } from "@/lib/i18n";
 import { createClient } from "@/lib/supabase/client";
 
-function parentalStatus(kind: "available" | "pending" | "used" | "locked") {
-  if (kind === "available") return "Available";
-  if (kind === "pending") return "Pending";
-  if (kind === "used") return "Used this year";
-  return "After first leave";
+function parentalStatus(
+  kind: "available" | "pending" | "used" | "locked",
+  t: ReturnType<typeof useT>,
+) {
+  if (kind === "available") return t("parental.available");
+  if (kind === "pending") return t("parental.pending");
+  if (kind === "used") return t("parental.used");
+  return t("parental.locked");
 }
 
 export function EmployeeView({
   active,
+  setActive,
   requests,
   authorizations,
   flash,
@@ -85,6 +94,7 @@ export function EmployeeView({
   reload,
 }: {
   active: string;
+  setActive: (label: string) => void;
   requests: LeaveRequest[];
   authorizations: Authorization[];
   flash: (message: string) => void;
@@ -97,6 +107,7 @@ export function EmployeeView({
   onNoticeFocusHandled?: () => void;
   reload: () => Promise<void>;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [pendingCancel, setPendingCancel] = useState<LeaveRequest | null>(null);
   const [pendingCancelAuthz, setPendingCancelAuthz] =
     useState<Authorization | null>(null);
@@ -154,7 +165,7 @@ export function EmployeeView({
   }, [tab, query, status, type, startFrom, endTo]);
 
   useEffect(() => {
-    if (!noticeFocus) return;
+    if (!noticeFocus || noticeFocus.tab === "attendance") return;
     skipClear.current = true;
     setQuery("");
     setStatus("All");
@@ -189,20 +200,24 @@ export function EmployeeView({
     setEndTo("");
   };
 
+  if (active === "Time clock") {
+    return <EmployeeTimeClock flash={flash} />;
+  }
+
   if (active === "My requests") {
     return (
       <>
         <Header
-          eyebrow="My workspace"
-          title="My requests"
+          eyebrow={t("employee.workspace")}
+          title={t("nav.myRequests")}
           action={
             tab === "leaves" ? (
               <Button onClick={() => setModal("request")}>
-                <Plus size={16} /> Request leave
+                <Plus size={16} /> {t("employee.requestLeave")}
               </Button>
             ) : (
               <Button onClick={() => setModal("authorization")}>
-                <Plus size={16} /> Request authorization
+                <Plus size={16} /> {t("employee.requestAuthz")}
               </Button>
             )
           }
@@ -211,13 +226,16 @@ export function EmployeeView({
           <RequestTabs value={tab} onChange={setTab} />
           {tab === "authorizations" && (
             <p className="authz-bucket">
-              {authzBalance.usedDurationLabel} of 8h used this month
+              {t("employee.usedOf8h", { used: authzBalance.usedDurationLabel })}
               {authzBalance.extraMinutes > 0 ? (
                 <span className="authz-extra-danger">
-                  {" "}
-                  · {authzBalance.extraLabel} over the free 8h
+                  {t("employee.overFree", { extra: authzBalance.extraLabel })}
                   {authzBalance.daysCharged > 0
-                    ? ` · takes ${authzBalance.daysCharged === 1 ? "1 vacation day" : `${authzBalance.daysCharged} vacation days`}`
+                    ? authzBalance.daysCharged === 1
+                      ? t("employee.takesOneShort")
+                      : t("employee.takesDaysShort", {
+                          count: authzBalance.daysCharged,
+                        })
                     : ""}
                 </span>
               ) : null}
@@ -292,8 +310,8 @@ export function EmployeeView({
             {filteredLeaves.length === 0 && (
               <div className="table-empty">
                 {mine.length === 0
-                  ? "No leave requests yet."
-                  : "No leave requests match these filters."}
+                  ? t("requests.emptyLeaves")
+                  : t("requests.emptyLeavesFiltered")}
               </div>
             )}
             <Pagination
@@ -340,7 +358,7 @@ export function EmployeeView({
                 }}
               >
                 <span>{request.durationLabel}</span>
-                <span>{formatDisplayDate(request.date)}</span>
+                <span>{formatDisplayDate(request.date, dateLocale)}</span>
                 <span>{request.timesLabel}</span>
                 <span className="authz-reason">{request.reason}</span>
                 <Status status={request.status} />
@@ -362,8 +380,8 @@ export function EmployeeView({
             {filteredAuthz.length === 0 && (
               <div className="table-empty">
                 {myAuthorizations.length === 0
-                  ? "No authorizations yet."
-                  : "No authorizations match these filters."}
+                  ? t("requests.emptyAuthz")
+                  : t("requests.emptyAuthzFiltered")}
               </div>
             )}
             <Pagination
@@ -378,10 +396,13 @@ export function EmployeeView({
         )}
         {pendingCancel && (
           <ConfirmModal
-            title="Cancel request"
-            message={`Cancel your ${pendingCancel.type} request for ${pendingCancel.dates}?`}
-            cancelLabel="Keep request"
-            confirmLabel="Cancel request"
+            title={t("requests.cancelTitle")}
+            message={t("requests.cancelLeave", {
+              type: pendingCancel.type,
+              dates: pendingCancel.dates,
+            })}
+            cancelLabel={t("requests.keep")}
+            confirmLabel={t("requests.cancelTitle")}
             close={() => setPendingCancel(null)}
             confirm={async () => {
               const message = await deleteLeaveRequestRecord(pendingCancel.id);
@@ -392,16 +413,19 @@ export function EmployeeView({
               await reload();
               setPendingCancel(null);
               setSelectedId(null);
-              flash("Request cancelled");
+              flash(t("requests.cancelled"));
             }}
           />
         )}
         {pendingCancelAuthz && (
           <ConfirmModal
-            title="Cancel request"
-            message={`Cancel your authorization for ${formatDisplayDate(pendingCancelAuthz.date)} (${pendingCancelAuthz.durationLabel})?`}
-            cancelLabel="Keep request"
-            confirmLabel="Cancel request"
+            title={t("requests.cancelTitle")}
+            message={t("requests.cancelAuthz", {
+              date: formatDisplayDate(pendingCancelAuthz.date, dateLocale),
+              duration: pendingCancelAuthz.durationLabel,
+            })}
+            cancelLabel={t("requests.keep")}
+            confirmLabel={t("requests.cancelTitle")}
             close={() => setPendingCancelAuthz(null)}
             confirm={async () => {
               const message = await deleteAuthorizationRecord(
@@ -414,7 +438,7 @@ export function EmployeeView({
               await reload();
               setPendingCancelAuthz(null);
               setSelectedId(null);
-              flash("Request cancelled");
+              flash(t("requests.cancelled"));
             }}
           />
         )}
@@ -453,7 +477,7 @@ export function EmployeeView({
         requests={mine}
         authorizations={myAuthorizations}
         employees={currentEmployee ? [currentEmployee] : []}
-        eyebrow="My workspace"
+        eyebrow={t("employee.workspace")}
       />
     );
   }
@@ -462,7 +486,7 @@ export function EmployeeView({
     return <Profile flash={flash} employee={currentEmployee} reload={reload} />;
   }
 
-  const today = new Date().toLocaleDateString("en-US", {
+  const today = new Date().toLocaleDateString(dateLocale, {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -518,61 +542,68 @@ export function EmployeeView({
     <div className="dashboard-page">
       <section className="welcome-row">
         <div>
-          <p className="eyebrow">My workspace · {today}</p>
-          <h1>Hello{hello ? `, ${hello}` : ""}</h1>
+          <p className="eyebrow">
+            {t("employee.workspace")} · {today}
+          </p>
+          <h1>
+            {hello
+              ? t("employee.helloName", { name: hello })
+              : t("employee.hello")}
+          </h1>
           <p className="page-subtitle">
             {soldeWarning
-              ? "You can still request leave in advance; your solde will go negative."
-              : "Your leave and authorization balances are below."}
+              ? t("employee.subtitleAdvance")
+              : t("employee.subtitleBalances")}
           </p>
         </div>
         <Button onClick={() => setModal("request")}>
-          <Plus size={17} /> Request leave
+          <Plus size={17} /> {t("employee.requestLeave")}
         </Button>
       </section>
       {soldeWarning && (
         <p className="solde-alert" role="alert">
           {annualDays < 0
-            ? `You have no remaining annual solde. Your balance is in the negative (${annualDays} days).`
-            : "You have no remaining annual solde. You can take leave in advance; your balance will go negative."}
+            ? t("employee.alertNegative", { days: annualDays })
+            : t("employee.alertZero")}
         </p>
       )}
+      <AttendanceOverviewCard onOpen={() => setActive("Time clock")} />
       <section className="metric-grid">
         <Metric
-          label="Monthly Balance"
+          label={t("employee.monthlyBalance")}
           value={String(monthlyDays)}
-          note="days accrued each month"
+          note={t("employee.monthlyNote")}
           tone="rose"
           icon={<CalendarDays size={19} />}
         />
         <Metric
-          label="Vacation Leave"
+          label={t("employee.vacation")}
           value={String(annual?.daysRemaining ?? 0)}
           note={
             annualDays < 0
-              ? "in the negative (advance)"
+              ? t("employee.vacationNeg")
               : annualDays === 0
-                ? "no days remaining — advance allowed"
-                : "days remaining this year"
+                ? t("employee.vacationZero")
+                : t("employee.daysRemaining")
           }
           tone="indigo"
           icon={<Palmtree size={19} />}
           valueTone={annualDays < 0 ? "negative" : undefined}
         />
         <Metric
-          label="Sick Leave"
+          label={t("employee.sick")}
           value={String(sick?.daysRemaining ?? 0)}
-          note="days remaining this year"
+          note={t("employee.daysRemaining")}
           tone="teal"
           icon={<ShieldCheck size={19} />}
         />
         <Metric
-          label="Auth Balance"
+          label={t("employee.authBalance")}
           value={authzBalance.remainingLabel}
           note={
             authzBalance.extraMinutes > 0
-              ? `${authzBalance.extraLabel} over the free 8h`
-              : `${authzBalance.usedDurationLabel} used this month`
+              ? t("employee.authOver", { extra: authzBalance.extraLabel })
+              : t("employee.authUsed", { used: authzBalance.usedDurationLabel })
           }
           tone={authzBalance.extraMinutes > 0 ? "rose" : "amber"}
           icon={<Clock3 size={19} />}
@@ -580,89 +611,77 @@ export function EmployeeView({
         />
       </section>
       <div className="card other-leave-card">
-        <p className="eyebrow">This month</p>
-        <h2>Authorization balance</h2>
+        <p className="eyebrow">{t("employee.thisMonth")}</p>
+        <h2>{t("employee.authzTitle")}</h2>
         <div className="request-solde">
           <div>
-            <span>Used</span>
+            <span>{t("employee.used")}</span>
             <b>{authzBalance.usedDurationLabel}</b>
           </div>
           <div>
-            <span>Left of 8h</span>
+            <span>{t("employee.leftOf8h")}</span>
             <b>{authzBalance.remainingLabel}</b>
           </div>
           <div className={authzBalance.extraMinutes > 0 ? "is-danger" : undefined}>
-            <span>Extra</span>
+            <span>{t("employee.extra")}</span>
             <b>{authzBalance.extraLabel}</b>
           </div>
         </div>
-        <p>
-          You get 8 free hours each month. Time above 8h takes 1 vacation day
-          per extra 8 hours.
-        </p>
+        <p>{t("employee.authzPolicy")}</p>
         {authzBalance.extraMinutes > 0 && (
           <p className="solde-alert" role="alert">
-            You have exceeded the free 8h this month by{" "}
-            {authzBalance.extraLabel}
+            {t("employee.authzExceeded", { extra: authzBalance.extraLabel })}
             {authzBalance.daysCharged > 0
-              ? `. This takes ${
-                  authzBalance.daysCharged === 1
-                    ? "1 vacation day"
-                    : `${authzBalance.daysCharged} vacation days`
-                }`
+              ? authzBalance.daysCharged === 1
+                ? t("employee.takesOneDay")
+                : t("employee.takesDays", { count: authzBalance.daysCharged })
               : ""}
             .
           </p>
         )}
         <div>
           <Button secondary onClick={() => setModal("authorization")}>
-            Request authorization
+            {t("employee.requestAuthz")}
           </Button>
         </div>
       </div>
       <section className="other-leave-board">
         <div className="other-leave-board-head">
-          <p className="eyebrow">Also yours</p>
-          <h2>Family and special leave</h2>
-          <p>These days are extra. They never take from your vacation.</p>
+          <p className="eyebrow">{t("employee.alsoYours")}</p>
+          <h2>{t("employee.familyTitle")}</h2>
+          <p>{t("employee.familySubtitle")}</p>
         </div>
         <div className="other-leave-split">
           <article className="card other-leave-panel is-parental">
-            <h3>Parental leave</h3>
-            <p>
-              You can take 3.5 months after you start. A second leave of up to
-              4 months can follow when the first one ends.
-            </p>
+            <h3>{t("employee.parental")}</h3>
+            <p>{t("employee.parentalBody")}</p>
             <div className="parental-tile-list">
               <div className="parental-tile">
                 <div>
-                  <b>First parental leave</b>
-                  <span>3.5 months after you start</span>
+                  <b>{t("employee.firstParental")}</b>
+                  <span>{t("employee.firstParentalNote")}</span>
                 </div>
                 <em className={`leave-chip is-${firstParentalKind}`}>
-                  {parentalStatus(firstParentalKind)}
+                  {parentalStatus(firstParentalKind, t)}
                 </em>
               </div>
               <div className="parental-tile">
                 <div>
-                  <b>Second parental leave</b>
-                  <span>Up to 4 months after the first</span>
+                  <b>{t("employee.secondParental")}</b>
+                  <span>{t("employee.secondParentalNote")}</span>
                 </div>
                 <em className={`leave-chip is-${secondParentalKind}`}>
-                  {parentalStatus(secondParentalKind)}
+                  {parentalStatus(secondParentalKind, t)}
                 </em>
               </div>
             </div>
           </article>
           <article className="card other-leave-panel is-exceptional">
-            <h3>Exceptional leave</h3>
-            <p>
-              For marriage, a death in the family, and similar events. Each
-              type has its own days, and they start over on 1 January.
-            </p>
+            <h3>{t("employee.exceptional")}</h3>
+            <p>{t("employee.exceptionalBody")}</p>
             <ul className="exceptional-leave-grid">
               {exceptionalTypes.length === 0 && (
-                <li>No exceptional leave types in the catalog yet.</li>
+                <li>{t("employee.exceptionalEmpty")}</li>
               )}
               {exceptionalTypes.map(({ type, used, cap }) => {
                 const usedPct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
@@ -675,9 +694,9 @@ export function EmployeeView({
                       </b>
                       <span className={remaining > 0 ? "is-remaining" : "is-used-up"}>
                         {remaining === 1
-                          ? "1 day left"
-                          : `${remaining} days left`}{" "}
-                        this year
+                          ? t("employee.oneDayLeft")
+                          : t("employee.daysLeft", { count: remaining })}{" "}
+                        {t("employee.thisYear")}
                       </span>
                     </div>
                     <div className="exceptional-leave-meter">
@@ -711,6 +730,7 @@ function Profile({
   employee: Employee | null;
   reload: () => Promise<void>;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [phone, setPhone] = useState(employee?.phone ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -734,7 +754,7 @@ function Profile({
         return;
       }
       await reload();
-      flash("Photo updated");
+      flash(t("profile.photoUpdated"));
     } finally {
       setUploadingPhoto(false);
     }
@@ -743,22 +763,22 @@ function Profile({
   const save = async () => {
     if (saving || uploadingPhoto) return;
     if (!employee) {
-      flash("You must be signed in");
+      flash(t("profile.mustSignIn"));
       return;
     }
 
     const current = currentPassword.trim();
     const next = newPassword.trim();
     if (current && !next) {
-      flash("Enter a new password");
+      flash(t("profile.enterNewPassword"));
       return;
     }
     if (next && !current) {
-      flash("Enter your current password");
+      flash(t("profile.enterCurrentPassword"));
       return;
     }
     if (next && next.length < 8) {
-      flash("Use at least 8 characters");
+      flash(t("profile.passwordShort"));
       return;
     }
 
@@ -769,7 +789,7 @@ function Profile({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash("You must be signed in");
+      flash(t("profile.mustSignIn"));
       return;
     }
 
@@ -806,7 +826,7 @@ function Profile({
     }
 
     await reload();
-    flash("Profile saved successfully");
+    flash(t("profile.saved"));
     setSaving(false);
   };
 
@@ -814,12 +834,9 @@ function Profile({
     <div className="profile-page">
       <section className="welcome-row">
         <div>
-          <p className="eyebrow">My workspace</p>
-          <h1>My profile</h1>
-          <p className="page-subtitle">
-            Your work details are set by HR. You can update your phone number
-            and password.
-          </p>
+          <p className="eyebrow">{t("employee.workspace")}</p>
+          <h1>{t("nav.myProfile")}</h1>
+          <p className="page-subtitle">{t("profile.subtitle")}</p>
         </div>
       </section>
       <section className="card profile-identity">
@@ -833,14 +850,14 @@ function Profile({
           }
         />
         <div className="profile-identity-copy">
-          <h2>{employee?.name || "Your profile"}</h2>
+          <h2>{employee?.name || t("profile.fallback")}</h2>
           <p>
             {[
               displayValue(employee?.jobTitle),
               employee?.department,
             ]
               .filter((part) => part && part !== "—")
-              .join(" · ") || "No job title on file"}
+              .join(" · ") || t("profile.noJob")}
           </p>
           {employee?.status ? <Status status={employee.status} /> : null}
         </div>
@@ -865,79 +882,90 @@ function Profile({
             }}
           >
             {uploadingPhoto
-              ? "Uploading..."
+              ? t("profile.uploading")
               : employee?.avatarUrl
-                ? "Change photo"
-                : "Upload photo"}
+                ? t("profile.changePhoto")
+                : t("profile.uploadPhoto")}
           </Button>
         </div>
       </section>
       <div className="profile-grid" key={employee?.id ?? "profile"}>
         <section className="card profile-section">
-          <h2>Contact</h2>
-          <p>Phone is the only contact field you can edit.</p>
+          <h2>{t("profile.contact")}</h2>
+          <p>{t("profile.contactNote")}</p>
           <Field
-            label="Phone"
+            label={t("profile.phone")}
             name="phone"
             value={phone}
             onChange={setPhone}
           />
           <div className="profile-facts">
             <div>
-              <span>Work email</span>
-              <b>{employee?.email || "—"}</b>
+              <span>{t("profile.workEmail")}</span>
+              <b>{employee?.email || t("common.dash")}</b>
             </div>
           </div>
         </section>
         <section className="card profile-section">
-          <h2>Employment</h2>
-          <p>These details come from your employee record.</p>
+          <h2>{t("profile.employment")}</h2>
+          <p>{t("profile.employmentNote")}</p>
           <div className="profile-facts">
             <div>
-              <span>Full name</span>
-              <b>{employee?.name || "—"}</b>
+              <span>{t("profile.fullName")}</span>
+              <b>{employee?.name || t("common.dash")}</b>
             </div>
             <div>
-              <span>Job title</span>
+              <span>{t("profile.jobTitle")}</span>
               <b>{displayValue(employee?.jobTitle)}</b>
             </div>
             <div>
-              <span>Department</span>
-              <b>{employee?.department || "—"}</b>
+              <span>{t("profile.department")}</span>
+              <b>{employee?.department || t("common.dash")}</b>
             </div>
             <div>
-              <span>Role</span>
-              <b>{employee?.role || "—"}</b>
-            </div>
-            <div>
-              <span>Status</span>
-              <b>{employee?.status || "—"}</b>
-            </div>
-            <div>
-              <span>Start date</span>
-              <b>{formatDisplayDate(employee?.startDate)}</b>
-            </div>
-            <div>
-              <span>Monthly leave days</span>
+              <span>{t("profile.role")}</span>
               <b>
-                {employee?.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS} days
+                {employee?.role
+                  ? translateRole(t, employee.role)
+                  : t("common.dash")}
+              </b>
+            </div>
+            <div>
+              <span>{t("profile.status")}</span>
+              <b>
+                {employee?.status
+                  ? translateStatus(t, employee.status)
+                  : t("common.dash")}
+              </b>
+            </div>
+            <div>
+              <span>{t("profile.startDate")}</span>
+              <b>{formatDisplayDate(employee?.startDate, dateLocale)}</b>
+            </div>
+            <div>
+              <span>{t("profile.monthlyDays")}</span>
+              <b>
+                {t("profile.monthlyValue", {
+                  count:
+                    employee?.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS,
+                })}
               </b>
             </div>
           </div>
         </section>
         <section className="card profile-section profile-section-wide">
-          <h2>Password</h2>
-          <p>Leave these blank to keep your current password.</p>
+          <h2>{t("profile.password")}</h2>
+          <p>{t("profile.passwordNote")}</p>
           <div className="form-row">
             <Field
-              label="Current password"
+              label={t("profile.currentPassword")}
               name="current_password"
               type="password"
               value={currentPassword}
               onChange={setCurrentPassword}
             />
             <Field
-              label="New password"
+              label={t("profile.newPassword")}
               name="new_password"
               type="password"
               value={newPassword}
@@ -948,7 +976,7 @@ function Profile({
       </div>
       <div className="profile-actions">
         <Button type="button" onClick={() => void save()}>
-          {saving ? "Saving..." : "Save profile"}
+          {saving ? t("profile.saving") : t("profile.save")}
         </Button>
       </div>
     </div>

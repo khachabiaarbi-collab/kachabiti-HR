@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useLanguage } from "@/lib/i18n";
 import { isoDate, mondayOf } from "@/lib/map-rows";
 
 function parseIso(iso: string) {
@@ -36,29 +37,34 @@ function inInclusiveRange(iso: string, start: string, end: string) {
   return iso >= from && iso <= to;
 }
 
-function formatSingleLabel(value: string, placeholder: string) {
+function formatSingleLabel(value: string, placeholder: string, locale: string) {
   if (!value) return placeholder;
-  return parseIso(value).toLocaleDateString("en-US", {
+  return parseIso(value).toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 }
 
-function formatRangeLabel(start: string, end: string) {
-  if (!start && !end) return "Select dates";
+function formatRangeLabel(
+  start: string,
+  end: string,
+  locale: string,
+  emptyLabel: string,
+) {
+  if (!start && !end) return emptyLabel;
   const monthDay: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
   };
   if (start && !end) {
-    return `${parseIso(start).toLocaleDateString("en-US", monthDay)} – …`;
+    return `${parseIso(start).toLocaleDateString(locale, monthDay)} – …`;
   }
   if (!start && end) {
-    return `… – ${parseIso(end).toLocaleDateString("en-US", monthDay)}`;
+    return `… – ${parseIso(end).toLocaleDateString(locale, monthDay)}`;
   }
   if (start === end) {
-    return parseIso(start).toLocaleDateString("en-US", {
+    return parseIso(start).toLocaleDateString(locale, {
       ...monthDay,
       year: "numeric",
     });
@@ -66,7 +72,7 @@ function formatRangeLabel(start: string, end: string) {
   const from = parseIso(start);
   const to = parseIso(end);
   const sameYear = from.getFullYear() === to.getFullYear();
-  return `${from.toLocaleDateString("en-US", sameYear ? monthDay : { ...monthDay, year: "numeric" })} – ${to.toLocaleDateString("en-US", { ...monthDay, year: "numeric" })}`;
+  return `${from.toLocaleDateString(locale, sameYear ? monthDay : { ...monthDay, year: "numeric" })} – ${to.toLocaleDateString(locale, { ...monthDay, year: "numeric" })}`;
 }
 
 function presetRange(kind: "week" | "month" | "30") {
@@ -133,6 +139,7 @@ function DatePickerPopover({
   label: string;
   hasValue: boolean;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [style, setStyle] = useState<React.CSSProperties>({});
   const months = useMemo(() => [viewMonth, addMonths(viewMonth, 1)], [viewMonth]);
 
@@ -182,26 +189,26 @@ function DatePickerPopover({
       className="range-picker-popover"
       ref={popoverRef}
       role="dialog"
-      aria-label="Choose date"
+      aria-label={t("date.choose")}
       style={style}
     >
       {showPresets && onPreset ? (
         <div className="range-picker-presets">
           <button type="button" onClick={() => onPreset("week")}>
-            This week
+            {t("date.thisWeek")}
           </button>
           <button type="button" onClick={() => onPreset("month")}>
-            This month
+            {t("date.thisMonth")}
           </button>
           <button type="button" onClick={() => onPreset("30")}>
-            Last 30 days
+            {t("date.last30")}
           </button>
         </div>
       ) : null}
       <div className="range-picker-nav">
         <button
           type="button"
-          aria-label="Previous month"
+          aria-label={t("cal.prevMonth")}
           onClick={() => setViewMonth((month) => addMonths(month, -1))}
         >
           <ChevronLeft size={16} />
@@ -209,7 +216,7 @@ function DatePickerPopover({
         <div>
           {months.map((month) => (
             <strong key={month.toISOString()}>
-              {month.toLocaleDateString("en-US", {
+              {month.toLocaleDateString(dateLocale, {
                 month: "long",
                 year: "numeric",
               })}
@@ -218,7 +225,7 @@ function DatePickerPopover({
         </div>
         <button
           type="button"
-          aria-label="Next month"
+          aria-label={t("cal.nextMonth")}
           onClick={() => setViewMonth((month) => addMonths(month, 1))}
         >
           <ChevronRight size={16} />
@@ -228,8 +235,8 @@ function DatePickerPopover({
         {months.map((month) => (
           <div className="range-picker-month" key={month.toISOString()}>
             <div className="range-picker-weekdays">
-              {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day) => (
-                <span key={day}>{day}</span>
+              {(["cal.mo", "cal.tu", "cal.we", "cal.th", "cal.fr", "cal.sa", "cal.su"] as const).map((day) => (
+                <span key={day}>{t(day)}</span>
               ))}
             </div>
             <div className="range-picker-grid">
@@ -295,7 +302,7 @@ function DatePickerPopover({
       <div className="range-picker-footer">
         <small>{label}</small>
         <button type="button" onClick={onClear} disabled={!hasValue}>
-          Clear
+          {t("date.clear")}
         </button>
       </div>
     </div>,
@@ -342,7 +349,7 @@ export function DatePicker({
   min,
   max,
   readOnly = false,
-  placeholder = "Select date",
+  placeholder,
 }: {
   value?: string;
   onChange?: (value: string) => void;
@@ -352,6 +359,8 @@ export function DatePicker({
   readOnly?: boolean;
   placeholder?: string;
 }) {
+  const { t, dateLocale } = useLanguage();
+  const resolvedPlaceholder = placeholder ?? t("date.selectDate");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [inner, setInner] = useState(value ?? "");
@@ -390,12 +399,12 @@ export function DatePicker({
         }}
       >
         <CalendarDays size={14} />
-        <span>{formatSingleLabel(current, placeholder)}</span>
+        <span>{formatSingleLabel(current, resolvedPlaceholder, dateLocale)}</span>
         {current && !readOnly ? (
           <span
             className="range-picker-clear"
             role="button"
-            aria-label="Clear date"
+            aria-label={t("date.clearDate")}
             onClick={(event) => {
               event.stopPropagation();
               setValue("");
@@ -424,7 +433,7 @@ export function DatePicker({
         min={min}
         max={max}
         showPresets={false}
-        label={formatSingleLabel(current, placeholder)}
+        label={formatSingleLabel(current, resolvedPlaceholder, dateLocale)}
         hasValue={Boolean(current)}
       />
     </div>
@@ -446,6 +455,7 @@ export function DateRangePicker({
   min?: string;
   max?: string;
 }) {
+  const { t, dateLocale } = useLanguage();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { open, setOpen } = usePickerOpen(triggerRef, popoverRef);
@@ -500,12 +510,12 @@ export function DateRangePicker({
         onClick={() => setOpen((next) => !next)}
       >
         <CalendarDays size={14} />
-        <span>{formatRangeLabel(startDate, endDate)}</span>
+        <span>{formatRangeLabel(startDate, endDate, dateLocale, t("date.selectDates"))}</span>
         {hasValue ? (
           <span
             className="range-picker-clear"
             role="button"
-            aria-label="Clear dates"
+            aria-label={t("date.clearDates")}
             onClick={(event) => {
               event.stopPropagation();
               clearRange();
@@ -532,7 +542,7 @@ export function DateRangePicker({
         min={min}
         max={max}
         showPresets
-        label={formatRangeLabel(startDate, endDate)}
+        label={formatRangeLabel(startDate, endDate, dateLocale, t("date.selectDates"))}
         hasValue={hasValue}
       />
     </div>

@@ -50,6 +50,13 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
+import {
+  formatDaysLabel,
+  translateRole,
+  translateStatus,
+  useLanguage,
+  useT,
+} from "@/lib/i18n";
 
 export function RequestModal({
   leaveTypes,
@@ -74,6 +81,7 @@ export function RequestModal({
   const [reason, setReason] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const t = useT();
   const leaveType = leaveTypes.find((type) => type.id === leaveTypeId) ?? null;
   const sick = Boolean(leaveType && isSickLeaveType(leaveType));
   const parental = Boolean(leaveType && isParentalLeaveType(leaveType));
@@ -146,43 +154,37 @@ export function RequestModal({
   const submit = async () => {
     if (saving) return;
     if (!leaveTypeId) {
-      flash("Choose a leave type");
+      flash(t("modal.chooseType"));
       return;
     }
     if (!startDate || !endDate) {
-      flash("Choose a start and end date");
+      flash(t("modal.chooseDates"));
       return;
     }
     if (endDate < startDate) {
-      flash("End date must be on or after the start date");
+      flash(t("modal.endAfterStart"));
       return;
     }
     if (sick && startDate < sickLeaveMinIsoDate()) {
-      flash(
-        "Sick leave must be applied for within 48 hours of the start date",
-      );
+      flash(t("modal.sick48h"));
       return;
     }
     if (parental && firstParental?.status === "Pending") {
-      flash("Your first parental leave is still pending");
+      flash(t("modal.parentalPending"));
       return;
     }
     if (secondParental) {
       if (startDate !== secondStart) {
-        flash(
-          "Second parental leave must start immediately after the first one ends",
-        );
+        flash(t("modal.parentalSecondStart"));
         return;
       }
       if (endDate > parentalEnd) {
-        flash("Second parental leave can last at most 4 months");
+        flash(t("modal.parentalSecondMax"));
         return;
       }
       const deadline = shiftCalendarMonths(firstParental.endDate, -1);
       if (deadline && isoDate() > deadline) {
-        flash(
-          "Second parental leave must be submitted no later than one month before the first leave ends",
-        );
+        flash(t("modal.parentalDeadline"));
         return;
       }
     }
@@ -194,7 +196,7 @@ export function RequestModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash("You must be signed in");
+      flash(t("profile.mustSignIn"));
       return;
     }
 
@@ -246,44 +248,37 @@ export function RequestModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Time away</p>
-        <h2>Request leave</h2>
+        <p className="eyebrow">{t("modal.timeAway")}</p>
+        <h2>{t("modal.requestLeave")}</h2>
         {advance && (
           <p className="solde-alert" role="alert">
             {remaining <= 0
-              ? `You have no remaining solde (${remaining} days). This leave will be taken in advance and your balance will go negative (${nextSolde} days).`
-              : `This leave exceeds your solde (${remaining} days remaining). Extra days will be taken in advance and your balance will go negative (${nextSolde} days).`}
+              ? t("modal.noSolde", { remaining, next: nextSolde })
+              : t("modal.exceedsSolde", { remaining, next: nextSolde })}
           </p>
         )}
         {sick && (
           <p className="leave-policy-alert" role="status">
-            <b>Sick leave policy</b>
-            You currently have {remaining} sick day(s) available each year. Any
-            sick leave beyond that balance will automatically deduct the extra
-            days from your Vacation leave balance. Note: Dates before 48 hours
-            ago are disabled in the calendar as sick leave must be applied for
-            within 48 hours of the start date.
+            <b>{t("modal.sickPolicy")}</b>
+            {t("modal.sickBody", { remaining })}
           </p>
         )}
         {parental && (
           <p className="leave-policy-alert" role="status">
-            <b>Parental leave benefit</b>
-            This parental leave is granted for 3.5 months starting on your
-            chosen start date. The end date is set automatically and the leave
-            is not deducted from your balance. After your first parental leave
-            ends you may request a second one that must start immediately after
-            the first and last at most 4 months, but it needs to be submitted no
-            later than one month before the first leave ends.
+            <b>{t("modal.parentalPolicy")}</b>
+            {t("modal.parentalBody")}
           </p>
         )}
         <label className="form-label">
-          Leave type
+          {t("modal.leaveType")}
           <select
             name="leave_type_id"
             value={leaveTypeId}
             onChange={(event) => chooseType(event.target.value)}
           >
-            {leaveTypes.length === 0 && <option value="">No leave types</option>}
+            {leaveTypes.length === 0 && (
+              <option value="">{t("modal.noTypes")}</option>
+            )}
             {leaveTypes.map((type) => (
               <option key={type.id} value={type.id}>
                 {displayLeaveType(type.name)}
@@ -293,7 +288,7 @@ export function RequestModal({
         </label>
         <div className="form-row">
           <Field
-            label="Start date"
+            label={t("modal.startDate")}
             name="start_date"
             type="date"
             value={startDate}
@@ -303,7 +298,7 @@ export function RequestModal({
             onChange={setStartDate}
           />
           <Field
-            label="End date"
+            label={t("modal.endDate")}
             name="end_date"
             type="date"
             value={endDate}
@@ -314,17 +309,17 @@ export function RequestModal({
           />
         </div>
         <label className="form-label">
-          Reason
+          {t("modal.reason")}
           <textarea
             name="reason"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            placeholder="Add a note for your manager"
+            placeholder={t("modal.reasonPlaceholder")}
           />
         </label>
         {sick && (
           <label className="form-label">
-            Attachment
+            {t("modal.attachment")}
             <input
               type="file"
               accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"
@@ -332,15 +327,15 @@ export function RequestModal({
             />
             <small>
               <Paperclip size={12} />{" "}
-              {file ? file.name : "Optional supporting document, up to 10 MB"}
+              {file ? file.name : t("modal.attachmentHint")}
             </small>
           </label>
         )}
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button>{saving ? "Submitting..." : "Submit request"}</Button>
+          <Button>{saving ? t("modal.submitting") : t("modal.submitRequest")}</Button>
         </div>
       </form>
     </div>
@@ -365,6 +360,7 @@ export function AuthorizationModal({
   const [endTime, setEndTime] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const t = useT();
   const durationMinutes =
     startTime && endTime ? minutesBetweenTimes(startTime, endTime) : 0;
   const usedMinutes = currentEmployeeId
@@ -386,19 +382,19 @@ export function AuthorizationModal({
   const submit = async () => {
     if (saving) return;
     if (!date) {
-      flash("Choose a date");
+      flash(t("modal.chooseDate"));
       return;
     }
     if (!startTime || !endTime) {
-      flash("Choose a start and end time");
+      flash(t("modal.chooseTimes"));
       return;
     }
     if (durationMinutes <= 0) {
-      flash("End time must be after start time");
+      flash(t("modal.endTimeAfter"));
       return;
     }
     if (!reason.trim()) {
-      flash("Add a reason");
+      flash(t("modal.addReason"));
       return;
     }
 
@@ -409,7 +405,7 @@ export function AuthorizationModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash("You must be signed in");
+      flash(t("profile.mustSignIn"));
       return;
     }
 
@@ -445,45 +441,42 @@ export function AuthorizationModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Authorization</p>
-        <h2>Request authorization</h2>
-        <p className="page-subtitle">
-          An authorization is a few hours during a work day (doctor, errand).
-          For a full day, use Request leave. You get 8 free hours each month.
-        </p>
+        <p className="eyebrow">{t("modal.authzEyebrow")}</p>
+        <h2>{t("modal.authzTitle")}</h2>
+        <p className="page-subtitle">{t("modal.authzSubtitle")}</p>
         <div className="request-solde">
           <div>
-            <span>Used</span>
+            <span>{t("employee.used")}</span>
             <b>{monthBalance.usedDurationLabel}</b>
           </div>
           <div>
-            <span>Left of 8h</span>
+            <span>{t("employee.leftOf8h")}</span>
             <b>{monthBalance.remainingLabel}</b>
           </div>
           <div>
-            <span>This request</span>
+            <span>{t("modal.thisRequest")}</span>
             <b>
               {durationMinutes > 0
                 ? formatDurationMinutes(durationMinutes)
-                : "—"}
+                : t("common.dash")}
             </b>
           </div>
         </div>
         {afterBalance.extraMinutes > 0 && (
           <p className="solde-alert" role="alert">
-            This request exceeds the free 8h
+            {t("modal.exceeds8h")}
             {extraDaysIfApproved > 0
-              ? `. If approved, it takes ${
+              ? `${
                   extraDaysIfApproved === 1
-                    ? "1 vacation day"
-                    : `${extraDaysIfApproved} vacation days`
-                } because you will be ${afterBalance.extraLabel} over`
-              : ` by ${afterBalance.extraLabel}`}
+                    ? t("modal.ifApprovedOne")
+                    : t("modal.ifApprovedDays", { count: extraDaysIfApproved })
+                }${t("modal.overBy", { extra: afterBalance.extraLabel })}`
+              : t("modal.byExtra", { extra: afterBalance.extraLabel })}
             .
           </p>
         )}
         <Field
-          label="Which day?"
+          label={t("modal.whichDay")}
           name="date"
           type="date"
           value={date}
@@ -491,14 +484,14 @@ export function AuthorizationModal({
         />
         <div className="form-row">
           <Field
-            label="From"
+            label={t("modal.from")}
             name="start_time"
             type="time"
             value={startTime}
             onChange={setStartTime}
           />
           <Field
-            label="Until"
+            label={t("modal.until")}
             name="end_time"
             type="time"
             value={endTime}
@@ -506,20 +499,20 @@ export function AuthorizationModal({
           />
         </div>
         <label className="form-label">
-          Why do you need to leave?
+          {t("modal.whyLeave")}
           <textarea
             name="reason"
             required
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            placeholder="Doctor visit, errand, family matter…"
+            placeholder={t("modal.authzPlaceholder")}
           />
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button>{saving ? "Sending..." : "Submit authorization"}</Button>
+          <Button>{saving ? t("modal.sending") : t("modal.submitAuthz")}</Button>
         </div>
       </form>
     </div>
@@ -540,19 +533,20 @@ export function EventModal({
   const [endDate, setEndDate] = useState("");
   const [type, setType] = useState("Company Holiday");
   const [saving, setSaving] = useState(false);
+  const t = useT();
 
   const submit = async () => {
     if (saving) return;
     if (!title.trim()) {
-      flash("Add an event title");
+      flash(t("modal.addEventTitle"));
       return;
     }
     if (!startDate || !endDate) {
-      flash("Choose a start and end date");
+      flash(t("modal.chooseDates"));
       return;
     }
     if (endDate < startDate) {
-      flash("End date must be on or after the start date");
+      flash(t("modal.endAfterStart"));
       return;
     }
     setSaving(true);
@@ -584,39 +578,39 @@ export function EventModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Team calendar</p>
-        <h2>Add event</h2>
-        <Field label="Event title" value={title} onChange={setTitle} />
+        <p className="eyebrow">{t("modal.eventEyebrow")}</p>
+        <h2>{t("modal.eventTitle")}</h2>
+        <Field label={t("modal.eventName")} value={title} onChange={setTitle} />
         <div className="form-row">
           <Field
-            label="Start date"
+            label={t("modal.startDate")}
             type="date"
             value={startDate}
             onChange={setStartDate}
           />
           <Field
-            label="End date"
+            label={t("modal.endDate")}
             type="date"
             value={endDate}
             onChange={setEndDate}
           />
         </div>
         <label className="form-label">
-          Type
+          {t("modal.eventType")}
           <select
             value={type}
             onChange={(event) => setType(event.target.value)}
           >
-            <option>Company Holiday</option>
-            <option>Team Event</option>
-            <option>Other</option>
+            <option value="Company Holiday">{t("modal.companyHoliday")}</option>
+            <option value="Team Event">{t("modal.teamEvent")}</option>
+            <option value="Other">{t("modal.other")}</option>
           </select>
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button>{saving ? "Saving..." : "Save event"}</Button>
+          <Button>{saving ? t("modal.saving") : t("modal.saveEvent")}</Button>
         </div>
       </form>
     </div>
@@ -625,31 +619,38 @@ export function EventModal({
 
 export function DepartmentModal({
   employees,
+  department = null,
   close,
   flash,
   onSaved,
 }: {
   employees: Employee[];
+  department?: Department | null;
   close: () => void;
   flash: (message: string) => void;
   onSaved: () => void | Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [managerId, setManagerId] = useState(employees[0]?.id ?? "");
+  const [name, setName] = useState(department?.name ?? "");
+  const [managerId, setManagerId] = useState(department?.managerId ?? "");
   const [saving, setSaving] = useState(false);
+  const t = useT();
+  const editing = Boolean(department);
 
   const submit = async () => {
     if (saving) return;
     if (!name.trim()) {
-      flash("Add a department name");
+      flash(t("modal.addDeptName"));
       return;
     }
     setSaving(true);
     const supabase = createClient();
-    const { error } = await supabase.from("departments").insert({
+    const payload = {
       name: name.trim(),
       manager_id: managerId || null,
-    });
+    };
+    const { error } = department
+      ? await supabase.from("departments").update(payload).eq("id", department.id)
+      : await supabase.from("departments").insert(payload);
     if (error) {
       setSaving(false);
       flash(error.message);
@@ -671,23 +672,23 @@ export function DepartmentModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Workspace structure</p>
-        <h2>Add department</h2>
+        <p className="eyebrow">{t("modal.deptEyebrow")}</p>
+        <h2>{editing ? t("modal.editDeptTitle") : t("modal.deptTitle")}</h2>
         <label className="form-label">
-          Department name
+          {t("modal.deptName")}
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Department name"
+            placeholder={t("modal.deptName")}
           />
         </label>
         <label className="form-label">
-          Assign manager
+          {t("modal.assignManager")}
           <select
             value={managerId}
             onChange={(e) => setManagerId(e.target.value)}
           >
-            <option value="">Unassigned</option>
+            <option value="">{t("department.unassigned")}</option>
             {employees.map((employee) => (
               <option key={employee.id} value={employee.id}>
                 {employee.name}
@@ -697,9 +698,17 @@ export function DepartmentModal({
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button>{saving ? "Adding..." : "Add department"}</Button>
+          <Button>
+            {saving
+              ? editing
+                ? t("modal.saving")
+                : t("modal.adding")
+              : editing
+                ? t("common.save")
+                : t("modal.deptTitle")}
+          </Button>
         </div>
       </form>
     </div>
@@ -727,11 +736,12 @@ export function EmployeeModal({
   );
   const [role, setRole] = useState("Employee");
   const [saving, setSaving] = useState(false);
+  const t = useT();
 
   const submit = async () => {
     if (saving) return;
     if (!name.trim() || !email.trim()) {
-      flash("Name and work email are required");
+      flash(t("modal.nameEmailRequired"));
       return;
     }
 
@@ -767,36 +777,36 @@ export function EmployeeModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Team directory</p>
-        <h2>Invite employee</h2>
+        <p className="eyebrow">{t("modal.inviteEyebrow")}</p>
+        <h2>{t("modal.inviteTitle")}</h2>
         <Field
-          label="Full name"
+          label={t("profile.fullName")}
           name="full_name"
           value={name}
           onChange={setName}
         />
         <Field
-          label="Work email"
+          label={t("profile.workEmail")}
           name="email"
           type="email"
           value={email}
           onChange={setEmail}
         />
         <Field
-          label="Job title"
+          label={t("profile.jobTitle")}
           name="job_title"
           value={jobTitle}
           onChange={setJobTitle}
         />
         <div className="form-row">
           <label className="form-label">
-            Department
+            {t("profile.department")}
             <select
               name="department_id"
               value={departmentId}
               onChange={(event) => setDepartmentId(event.target.value)}
             >
-              <option value="">Unassigned</option>
+              <option value="">{t("department.unassigned")}</option>
               {departments.map((department) => (
                 <option key={department.id} value={department.id}>
                   {department.name}
@@ -805,43 +815,39 @@ export function EmployeeModal({
             </select>
           </label>
           <label className="form-label">
-            Role
+            {t("profile.role")}
             <select
               name="role"
               value={role}
               onChange={(event) => setRole(event.target.value)}
             >
-              <option>Employee</option>
-              <option>Manager</option>
-              <option>Administrator</option>
+              <option value="Employee">{translateRole(t, "Employee")}</option>
+              <option value="Manager">{translateRole(t, "Manager")}</option>
+              <option value="Administrator">{translateRole(t, "Administrator")}</option>
             </select>
           </label>
         </div>
         <Field
-          label="Start date"
+          label={t("profile.startDate")}
           name="start_date"
           type="date"
           value={startDate}
           onChange={setStartDate}
         />
         <Field
-          label="Monthly leave days"
+          label={t("profile.monthlyDays")}
           name="monthly_leave_days"
           type="number"
           step="0.01"
           value={monthlyLeaveDays}
           onChange={setMonthlyLeaveDays}
         />
-        <p className="page-subtitle">
-          They will set a password from the invite email. Annual solde is
-          months worked times this monthly rate (default 1.75). A future start
-          date stays at 0.
-        </p>
+        <p className="page-subtitle">{t("modal.inviteNote")}</p>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button>{saving ? "Sending..." : "Send invite"}</Button>
+          <Button>{saving ? t("modal.sending") : t("modal.sendInvite")}</Button>
         </div>
       </form>
     </div>
@@ -894,6 +900,7 @@ export function EmployeeDetail({
     ),
   );
   const [saving, setSaving] = useState(false);
+  const t = useT();
 
   const applyHireSolde = (nextStart: string, nextMonthly: string) => {
     setStartDate(nextStart);
@@ -1004,7 +1011,7 @@ export function EmployeeDetail({
       initials: initialsFromName(name.trim()),
     };
     onSaved(nextEmployee, solde);
-    flash("Employee details saved");
+    flash(t("panel.saved"));
     setSaving(false);
   };
 
@@ -1020,19 +1027,19 @@ export function EmployeeDetail({
       </p>
       <div className="employee-edit-form">
         <div className="detail-block">
-          <p className="eyebrow">Employee details</p>
-          <Field label="Full name" name="full_name" value={name} onChange={setName} />
-          <Field label="Work email" name="email" value={email} onChange={setEmail} />
-          <Field label="Phone" name="phone" value={phone} onChange={setPhone} />
-          <Field label="Job title" name="job_title" value={jobTitle} onChange={setJobTitle} />
+          <p className="eyebrow">{t("panel.details")}</p>
+          <Field label={t("profile.fullName")} name="full_name" value={name} onChange={setName} />
+          <Field label={t("profile.workEmail")} name="email" value={email} onChange={setEmail} />
+          <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
+          <Field label={t("profile.jobTitle")} name="job_title" value={jobTitle} onChange={setJobTitle} />
           <label className="form-label">
-            Department
+            {t("profile.department")}
             <select
               name="department_id"
               value={departmentId}
               onChange={(event) => setDepartmentId(event.target.value)}
             >
-              <option value="">Unassigned</option>
+              <option value="">{t("department.unassigned")}</option>
               {departments.map((department) => (
                 <option key={department.id} value={department.id}>
                   {department.name}
@@ -1041,37 +1048,37 @@ export function EmployeeDetail({
             </select>
           </label>
           <label className="form-label">
-            Role
+            {t("profile.role")}
             <select
               name="role"
               value={role}
               onChange={(event) => setRole(event.target.value)}
             >
-              <option>Employee</option>
-              <option>Manager</option>
-              <option>Administrator</option>
+              <option value="Employee">{translateRole(t, "Employee")}</option>
+              <option value="Manager">{translateRole(t, "Manager")}</option>
+              <option value="Administrator">{translateRole(t, "Administrator")}</option>
             </select>
           </label>
           <label className="form-label">
-            Status
+            {t("profile.status")}
             <select
               name="status"
               value={status}
               onChange={(event) => setStatus(event.target.value)}
             >
-              <option>Active</option>
-              <option>Inactive</option>
+              <option value="Active">{translateStatus(t, "Active")}</option>
+              <option value="Inactive">{translateStatus(t, "Inactive")}</option>
             </select>
           </label>
           <Field
-            label="Start date"
+            label={t("profile.startDate")}
             name="start_date"
             type="date"
             value={startDate}
             onChange={(value) => applyHireSolde(value, monthlyLeaveDays)}
           />
           <Field
-            label="Monthly leave days"
+            label={t("profile.monthlyDays")}
             name="monthly_leave_days"
             type="number"
             step="0.01"
@@ -1080,14 +1087,10 @@ export function EmployeeDetail({
           />
         </div>
         <div className="detail-block">
-          <p className="eyebrow">Solde</p>
-          <p className="page-subtitle">
-            Annual solde is months worked since the start date times the monthly
-            rate. A future start stays at 0. Sick is the full yearly default
-            (10) and is not tied to the monthly annual rate.
-          </p>
+          <p className="eyebrow">{t("panel.solde")}</p>
+          <p className="page-subtitle">{t("panel.soldeNote")}</p>
           {solde.length === 0 ? (
-            <span>No leave types yet</span>
+            <span>{t("panel.noTypes")}</span>
           ) : (
             solde.map((row, index) => (
               <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
@@ -1095,7 +1098,7 @@ export function EmployeeDetail({
                 <div>
                   <button
                     type="button"
-                    aria-label={`Decrease ${row.typeName}`}
+                    aria-label={t("panel.decrease", { name: row.typeName })}
                     onClick={(event) => {
                       event.preventDefault();
                       bumpSolde(index, -1);
@@ -1115,7 +1118,7 @@ export function EmployeeDetail({
                   />
                   <button
                     type="button"
-                    aria-label={`Increase ${row.typeName}`}
+                    aria-label={t("panel.increase", { name: row.typeName })}
                     onClick={(event) => {
                       event.preventDefault();
                       bumpSolde(index, 1);
@@ -1129,18 +1132,20 @@ export function EmployeeDetail({
           )}
         </div>
         <Button onClick={() => void save()}>
-          {saving ? "Saving..." : "Save changes"}
+          {saving ? t("modal.saving") : t("panel.saveChanges")}
         </Button>
       </div>
     </div>
   );
 }
 
-function daysLabel(value: number | null) {
-  if (value === null) return "—";
-  if (value === 1) return "1 day";
-  if (value === -1) return "-1 day";
-  return `${value} days`;
+function daysLabel(
+  t: ReturnType<typeof useT>,
+  value: number | null,
+) {
+  if (value === null) return t("common.dash");
+  if (value === -1) return `-${t("common.oneDay")}`;
+  return formatDaysLabel(t, value);
 }
 
 export function RequestDetail({
@@ -1205,6 +1210,8 @@ export function RequestDetail({
   const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
+  const t = useT();
+  const { dateLocale } = useLanguage();
 
   useEffect(() => {
     if (!request.attachmentPath) {
@@ -1236,89 +1243,87 @@ export function RequestDetail({
       {advance && (
         <p className="solde-alert" role="alert">
           {alreadyApproved
-            ? `No remaining solde. Balance is in the negative (${soldeActuel} days).`
-            : `No remaining solde (${soldeActuel} days). This request is leave in advance; balance will go negative (${nextSolde} days).`}
+            ? t("panel.noSoldeApproved", { days: soldeActuel ?? 0 })
+            : t("panel.noSoldeAdvance", {
+                remaining: soldeActuel ?? 0,
+                next: nextSolde ?? 0,
+              })}
         </p>
       )}
       {sick && (
         <p className="leave-policy-alert" role="status">
-          <b>Sick leave policy</b>
-          Extra sick days beyond the yearly sick balance are deducted from
-          Vacation leave. Sick leave must be applied for within 48 hours of the
-          start date.
+          <b>{t("modal.sickPolicy")}</b>
+          {t("panel.sickReview")}
         </p>
       )}
       {parental && (
         <p className="leave-policy-alert" role="status">
-          <b>Parental leave benefit</b>
-          This leave is not deducted from vacation balance. First leave is 3.5
-          months; a second leave of up to 4 months must start immediately after
-          the first and be submitted no later than one month before the first
-          ends.
+          <b>{t("modal.parentalPolicy")}</b>
+          {t("panel.parentalReview")}
         </p>
       )}
       <div className="request-solde">
         <div>
-          <span>Solde actuel</span>
-          <b>{daysLabel(soldeActuel)}</b>
+          <span>{t("panel.currentBalance")}</span>
+          <b>{daysLabel(t, soldeActuel)}</b>
         </div>
         <div>
-          <span>Total</span>
-          <b>{daysLabel(total)}</b>
+          <span>{t("panel.total")}</span>
+          <b>{daysLabel(t, total)}</b>
         </div>
         <div>
-          <span>Duration</span>
+          <span>{t("panel.duration")}</span>
           <b>{request.days}</b>
         </div>
       </div>
       <div className="detail-block">
-        <p className="eyebrow">Request details</p>
+        <p className="eyebrow">{t("panel.requestDetails")}</p>
         <div className="detail-row">
-          <span>Leave type</span>
+          <span>{t("modal.leaveType")}</span>
           <b>{request.type}</b>
         </div>
         <div className="detail-row">
-          <span>Start date</span>
-          <b>{formatDisplayDate(request.startDate)}</b>
+          <span>{t("modal.startDate")}</span>
+          <b>{formatDisplayDate(request.startDate, dateLocale)}</b>
         </div>
         <div className="detail-row">
-          <span>End date</span>
-          <b>{formatDisplayDate(request.endDate)}</b>
+          <span>{t("modal.endDate")}</span>
+          <b>{formatDisplayDate(request.endDate, dateLocale)}</b>
         </div>
         <div className="detail-row">
-          <span>Duration</span>
+          <span>{t("panel.duration")}</span>
           <b>{request.days}</b>
         </div>
         <div className="detail-row">
-          <span>Submitted</span>
+          <span>{t("panel.submitted")}</span>
           <b>
             {request.createdAt
-              ? new Date(request.createdAt).toLocaleDateString("en-US", {
+              ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
                   month: "short",
                   day: "numeric",
                   year: "numeric",
                 })
-              : "—"}
+              : t("common.dash")}
           </b>
         </div>
         {approverName && (
           <div className="detail-row">
-            <span>Reviewed by</span>
+            <span>{t("panel.reviewedBy")}</span>
             <b>{approverName}</b>
           </div>
         )}
         {employee?.email && (
           <div className="detail-row">
-            <span>Work email</span>
+            <span>{t("profile.workEmail")}</span>
             <b>{employee.email}</b>
           </div>
         )}
         <div className="detail-reason">
-          <span>Reason</span>
+          <span>{t("modal.reason")}</span>
           <p>{displayValue(request.reason)}</p>
         </div>
         <div className="detail-row">
-          <span>Attachment</span>
+          <span>{t("modal.attachment")}</span>
           {request.attachmentPath ? (
             attachmentUrl ? (
               <a
@@ -1328,32 +1333,36 @@ export function RequestDetail({
                 rel="noreferrer"
               >
                 <Paperclip size={12} />
-                {request.attachmentName || "View file"}
+                {request.attachmentName || t("panel.viewFile")}
               </a>
             ) : (
-              <b>{request.attachmentName || "Attached"}</b>
+              <b>{request.attachmentName || t("panel.attached")}</b>
             )
           ) : (
-            <b>—</b>
+            <b>{t("common.dash")}</b>
           )}
         </div>
       </div>
       {request.status === "Pending" && onApprove && onReject && (
         <div className="request-detail-actions">
           <Button type="button" secondary onClick={() => setConfirmReject(true)}>
-            {busy ? "Please wait..." : "Reject"}
+            {busy ? t("panel.pleaseWait") : t("common.reject")}
           </Button>
           <Button type="button" onClick={() => setConfirmApprove(true)}>
-            {busy ? "Please wait..." : "Approve"}
+            {busy ? t("panel.pleaseWait") : t("common.approve")}
           </Button>
         </div>
       )}
       {confirmApprove && onApprove && (
         <ConfirmModal
-          title="Approve request"
-          message={`Approve ${request.name}'s ${request.type} request for ${request.dates}?`}
-          confirmLabel="Approve"
-          cancelLabel="Go back"
+          title={t("admin.approveTitle")}
+          message={t("admin.approveLeave", {
+            name: request.name,
+            type: request.type,
+            dates: request.dates,
+          })}
+          confirmLabel={t("common.approve")}
+          cancelLabel={t("admin.goBack")}
           danger={false}
           close={() => setConfirmApprove(false)}
           confirm={async () => {
@@ -1364,10 +1373,14 @@ export function RequestDetail({
       )}
       {confirmReject && onReject && (
         <ConfirmModal
-          title="Reject request"
-          message={`Reject ${request.name}'s ${request.type} request for ${request.dates}?`}
-          confirmLabel="Reject"
-          cancelLabel="Go back"
+          title={t("admin.rejectTitle")}
+          message={t("admin.rejectLeave", {
+            name: request.name,
+            type: request.type,
+            dates: request.dates,
+          })}
+          confirmLabel={t("common.reject")}
+          cancelLabel={t("admin.goBack")}
           close={() => setConfirmReject(false)}
           confirm={async () => {
             await onReject();
@@ -1405,6 +1418,8 @@ export function AuthorizationDetail({
   };
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
+  const t = useT();
+  const { dateLocale } = useLanguage();
   const vacationDaysIfApproved =
     request.status === "Pending"
       ? authorizationVacationDaysToCharge(usedMinutes, request.durationMinutes)
@@ -1423,81 +1438,90 @@ export function AuthorizationDetail({
       <Status status={request.status} />
       <div className="request-solde is-two">
         <div>
-          <span>Duration</span>
+          <span>{t("panel.duration")}</span>
           <b>{request.durationLabel}</b>
         </div>
         <div>
-          <span>This month</span>
+          <span>{t("employee.thisMonth")}</span>
           <b>{authorizationBucketLabel(usedMinutes)}</b>
         </div>
       </div>
       <div className="detail-block">
-        <p className="eyebrow">Request details</p>
+        <p className="eyebrow">{t("panel.requestDetails")}</p>
         <div className="detail-row">
-          <span>Date</span>
-          <b>{formatDisplayDate(request.date)}</b>
+          <span>{t("panel.date")}</span>
+          <b>{formatDisplayDate(request.date, dateLocale)}</b>
         </div>
         <div className="detail-row">
-          <span>Start time</span>
+          <span>{t("panel.startTime")}</span>
           <b>{formatClock(request.startTime)}</b>
         </div>
         <div className="detail-row">
-          <span>End time</span>
+          <span>{t("panel.endTime")}</span>
           <b>{formatClock(request.endTime)}</b>
         </div>
         <div className="detail-row">
-          <span>Duration</span>
+          <span>{t("panel.duration")}</span>
           <b>{request.durationLabel}</b>
         </div>
         <div className="detail-row">
-          <span>Submitted</span>
+          <span>{t("panel.submitted")}</span>
           <b>
             {request.createdAt
-              ? new Date(request.createdAt).toLocaleDateString("en-US", {
+              ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
                   month: "short",
                   day: "numeric",
                   year: "numeric",
                 })
-              : "—"}
+              : t("common.dash")}
           </b>
         </div>
         {approverName && (
           <div className="detail-row">
-            <span>Reviewed by</span>
+            <span>{t("panel.reviewedBy")}</span>
             <b>{approverName}</b>
           </div>
         )}
         {employee?.email && (
           <div className="detail-row">
-            <span>Work email</span>
+            <span>{t("profile.workEmail")}</span>
             <b>{employee.email}</b>
           </div>
         )}
         <div className="detail-reason">
-          <span>Reason</span>
+          <span>{t("modal.reason")}</span>
           <p>{displayValue(request.reason)}</p>
         </div>
       </div>
       {request.status === "Pending" && onApprove && onReject && (
         <div className="request-detail-actions">
           <Button type="button" secondary onClick={() => setConfirmReject(true)}>
-            {busy ? "Please wait..." : "Reject"}
+            {busy ? t("panel.pleaseWait") : t("common.reject")}
           </Button>
           <Button type="button" onClick={() => setConfirmApprove(true)}>
-            {busy ? "Please wait..." : "Approve"}
+            {busy ? t("panel.pleaseWait") : t("common.approve")}
           </Button>
         </div>
       )}
       {confirmApprove && onApprove && (
         <ConfirmModal
-          title="Approve request"
+          title={t("admin.approveTitle")}
           message={
             vacationDaysIfApproved > 0
-              ? `Approve ${request.name}'s authorization for ${formatDisplayDate(request.date)} (${request.durationLabel})? This takes ${vacationDaysIfApproved} vacation day${vacationDaysIfApproved === 1 ? "" : "s"} because they will be over the free 8h.`
-              : `Approve ${request.name}'s authorization for ${formatDisplayDate(request.date)} (${request.durationLabel})?`
+              ? t("admin.approveAuthzDays", {
+                  name: request.name,
+                  date: formatDisplayDate(request.date, dateLocale),
+                  duration: request.durationLabel,
+                  days: vacationDaysIfApproved,
+                })
+              : t("admin.approveAuthz", {
+                  name: request.name,
+                  date: formatDisplayDate(request.date, dateLocale),
+                  duration: request.durationLabel,
+                })
           }
-          confirmLabel="Approve"
-          cancelLabel="Go back"
+          confirmLabel={t("common.approve")}
+          cancelLabel={t("admin.goBack")}
           danger={false}
           close={() => setConfirmApprove(false)}
           confirm={async () => {
@@ -1508,10 +1532,14 @@ export function AuthorizationDetail({
       )}
       {confirmReject && onReject && (
         <ConfirmModal
-          title="Reject request"
-          message={`Reject ${request.name}'s authorization for ${formatDisplayDate(request.date)} (${request.durationLabel})?`}
-          confirmLabel="Reject"
-          cancelLabel="Go back"
+          title={t("admin.rejectTitle")}
+          message={t("admin.rejectAuthz", {
+            name: request.name,
+            date: formatDisplayDate(request.date, dateLocale),
+            duration: request.durationLabel,
+          })}
+          confirmLabel={t("common.reject")}
+          cancelLabel={t("admin.goBack")}
           close={() => setConfirmReject(false)}
           confirm={async () => {
             await onReject();
@@ -1526,13 +1554,13 @@ export function AuthorizationDetail({
 export function ConfirmModal({
   title,
   message,
-  confirmLabel = "Delete",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   danger = true,
   close,
   confirm,
 }: {
-  title: string;
+  title?: string;
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
@@ -1540,6 +1568,7 @@ export function ConfirmModal({
   close: () => void;
   confirm: () => void | Promise<void>;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
 
   const run = async () => {
@@ -1558,15 +1587,15 @@ export function ConfirmModal({
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />
         </button>
-        <p className="eyebrow">Please confirm</p>
-        <h2>{title}</h2>
+        <p className="eyebrow">{t("confirm.please")}</p>
+        <h2>{title || t("confirm.please")}</h2>
         <p className="page-subtitle">{message}</p>
         <div className="modal-actions">
           <Button secondary onClick={close}>
-            {cancelLabel}
+            {cancelLabel ?? t("common.cancel")}
           </Button>
           <Button onClick={() => void run()}>
-            {busy ? "Please wait..." : confirmLabel}
+            {busy ? t("panel.pleaseWait") : confirmLabel ?? t("common.delete")}
           </Button>
         </div>
       </div>

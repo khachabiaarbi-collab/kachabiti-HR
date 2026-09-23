@@ -20,7 +20,16 @@ import {
   CalendarDays,
 } from "lucide-react";
 import type { Employee, LeaveRequest, Notice, Role } from "@/lib/app-types";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { Avatar, Logo } from "@/components/primitives";
+import {
+  formatRelativeTime,
+  screenLabel,
+  translateNotice,
+  translateRole,
+  translateStatus,
+  useLanguage,
+} from "@/lib/i18n";
 import { isoDate } from "@/lib/map-rows";
 import { createClient } from "@/lib/supabase/client";
 
@@ -30,6 +39,7 @@ const adminNav = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Leave requests", icon: FileText },
   { label: "Team calendar", icon: CalendarDays },
+  { label: "Attendance", icon: Clock3 },
   { label: "People", icon: Users },
   { label: "Departments", icon: Building2 },
   { label: "Analytics", icon: Activity },
@@ -48,6 +58,7 @@ export function Sidebar({
   currentEmployee: Employee | null;
   requests?: LeaveRequest[];
 }) {
+  const t = useLanguage().t;
   return (
     <aside className="sidebar admin-sidebar">
       <div className="sidebar-top">
@@ -57,18 +68,18 @@ export function Sidebar({
         </button>
       </div>
       <div className="mode-badge">
-        <ShieldCheck size={14} /> Admin workspace
+        <ShieldCheck size={14} /> {t("chrome.adminWorkspace")}
       </div>
       <div className="workspace-switcher">
         <div className="workspace-icon">K</div>
         <div>
-          <p className="workspace-name">Kachabiti HR</p>
-          <p className="workspace-subtitle">Company workspace</p>
+          <p className="workspace-name">{t("chrome.workspaceName")}</p>
+          <p className="workspace-subtitle">{t("chrome.workspaceSubtitle")}</p>
         </div>
         {/* <ChevronDown size={15} className="ml-auto" /> */}
       </div>
       <nav className="nav-list">
-        <p className="nav-label">Manage</p>
+        <p className="nav-label">{t("nav.manage")}</p>
         {adminNav.map((item) => {
           const Icon = item.icon;
           return (
@@ -78,35 +89,37 @@ export function Sidebar({
               onClick={() => setActive(item.label)}
             >
               <Icon size={18} />
-              <span>{item.label}</span>
+              <span>{screenLabel(t, item.label)}</span>
               {item.label === "Leave requests" && (
                 <span className="nav-count">{requests.length}</span>
               )}
             </button>
           );
         })}
-        <p className="nav-label nav-label-spaced">Workspace</p>
+        <p className="nav-label nav-label-spaced">{t("nav.workspace")}</p>
         <button
           className={`nav-item ${active === "Settings" ? "nav-item-active" : ""}`}
           onClick={() => setActive("Settings")}
         >
           <Settings size={18} />
-          Settings
+          {t("nav.settings")}
         </button>
       </nav>
       <div className="sidebar-bottom">
         <div className="upgrade-card">
           <Activity size={16} />
           <div>
-            <p className="upgrade-title">Live workspace</p>
-            <p className="upgrade-copy">Everything is in sync.</p>
+            <p className="upgrade-title">{t("chrome.liveWorkspace")}</p>
+            <p className="upgrade-copy">{t("chrome.liveCopy")}</p>
           </div>
         </div>
         <div className="user-row">
           <Avatar e={currentEmployee ?? guestAvatar} small />
           <div>
             <p className="user-name">{currentEmployee?.name ?? "…"}</p>
-            <p className="user-role">{currentEmployee?.role ?? "Admin"}</p>
+            <p className="user-role">
+              {translateRole(t, currentEmployee?.role ?? "Admin")}
+            </p>
           </div>
           <button className="logout-icon" onClick={logout}>
             <LogOut size={16} />
@@ -126,17 +139,18 @@ export function EmployeeNav({
   setActive: (label: string) => void;
   children?: ReactNode;
 }) {
+  const t = useLanguage().t;
   return (
     <div className="employee-nav">
       <Logo />
       <nav>
-        {["Overview", "My requests", "Calendar", "My profile"].map((item) => (
+        {["Overview", "Time clock", "My requests", "Calendar", "My profile"].map((item) => (
           <button
             key={item}
             className={active === item ? "active" : ""}
             onClick={() => setActive(item)}
           >
-            {item}
+            {screenLabel(t, item)}
           </button>
         ))}
       </nav>
@@ -176,6 +190,7 @@ export function TopActions({
   onOpenNotice?: (notice: Notice) => void;
   onOpenRequest?: (request: LeaveRequest) => void;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [showAccount, setShowAccount] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -251,7 +266,7 @@ export function TopActions({
         <button
           type="button"
           className="global-search-trigger"
-          aria-label="Search people and requests"
+          aria-label={t("search.aria")}
           aria-expanded={showSearch}
           onClick={() => {
             setShowAccount(false);
@@ -265,14 +280,14 @@ export function TopActions({
           ref={searchInputRef}
           value={globalSearch}
           onChange={(e) => setGlobalSearch(e.target.value)}
-          placeholder="Search people, requests..."
-          aria-label="Search people and requests"
+          placeholder={t("search.placeholder")}
+          aria-label={t("search.aria")}
         />
         {globalSearch && (
           <button
             type="button"
             className="global-search-clear"
-            aria-label="Clear search"
+            aria-label={t("search.clear")}
             onClick={() => {
               setGlobalSearch("");
               searchInputRef.current?.focus();
@@ -285,9 +300,9 @@ export function TopActions({
           <div className="search-results">
             {role !== "Employee" && (
               <>
-                <b>Employees</b>
+                <b>{t("search.employees")}</b>
                 {peopleHits.length === 0 ? (
-                  <span className="search-empty">No matching people</span>
+                  <span className="search-empty">{t("search.noPeople")}</span>
                 ) : (
                   peopleHits.map((employee) => (
                     <button
@@ -309,9 +324,9 @@ export function TopActions({
                 )}
               </>
             )}
-            <b>Requests</b>
+            <b>{t("search.requests")}</b>
             {requestHits.length === 0 ? (
-              <span className="search-empty">No matching requests</span>
+              <span className="search-empty">{t("search.noRequests")}</span>
             ) : (
               requestHits.map((request) => (
                 <button
@@ -333,7 +348,10 @@ export function TopActions({
                   <span>
                     <strong>{request.type}</strong>
                     <small>
-                      {request.name} · {request.status}
+                      {t("search.requestMeta", {
+                        name: request.name,
+                        status: translateStatus(t, request.status),
+                      })}
                     </small>
                   </span>
                 </button>
@@ -346,7 +364,7 @@ export function TopActions({
         <button
           type="button"
           className="icon-button notification-button"
-          aria-label="Notifications"
+          aria-label={t("notices.title")}
           aria-haspopup="true"
           aria-expanded={showNotices}
           onClick={() => {
@@ -365,12 +383,15 @@ export function TopActions({
           />
         )}
       </div>
-      <span className="mode-badge light">{role} mode</span>
+      <LanguageSwitcher compact />
+      <span className="mode-badge light">
+        {t("chrome.mode", { role: translateRole(t, role) })}
+      </span>
       <div className="account-wrap">
         <button
           type="button"
           className="top-avatar"
-          aria-label="Account menu"
+          aria-label={t("chrome.accountMenu")}
           aria-haspopup="menu"
           aria-expanded={showAccount}
           onClick={() => {
@@ -387,7 +408,7 @@ export function TopActions({
         {showAccount && (
           <div className="account-menu" role="menu">
             <div className="account-menu-head">
-              <p>{currentEmployee?.name ?? "Account"}</p>
+              <p>{currentEmployee?.name ?? t("chrome.account")}</p>
               <span>{currentEmployee?.email ?? ""}</span>
             </div>
             <button
@@ -399,7 +420,7 @@ export function TopActions({
               }}
             >
               <Settings size={16} />
-              {settingsLabel}
+              {screenLabel(t, settingsLabel)}
             </button>
             <button
               type="button"
@@ -411,7 +432,7 @@ export function TopActions({
               }}
             >
               <LogOut size={16} />
-              Log out
+              {t("chrome.logOut")}
             </button>
           </div>
         )}
@@ -434,6 +455,7 @@ function NotificationPanel({
   setNotices: (notices: Notice[]) => void;
   onOpenNotice?: (notice: Notice) => void;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [justReadIds, setJustReadIds] = useState<string[]>([]);
   const icon = {
     approved: <Check />,
@@ -444,8 +466,8 @@ function NotificationPanel({
   const today = notices.filter(noticeIsToday);
   const earlier = notices.filter((notice) => !noticeIsToday(notice));
   const groups = [
-    { label: "Today", items: today },
-    { label: "Earlier", items: earlier },
+    { label: t("notices.today"), items: today },
+    { label: t("notices.earlier"), items: earlier },
   ].filter((group) => group.items.length > 0);
 
   const unreadIds = notices
@@ -488,15 +510,15 @@ function NotificationPanel({
   return (
     <div className="notification-panel">
       <div className="notification-head">
-        <b>Notifications</b>
+        <b>{t("notices.title")}</b>
         {(unreadIds.length > 0 || canUnreadNew) && (
           <button type="button" onClick={markAll}>
-            {canUnreadNew ? "Mark as unread" : "Mark all as read"}
+            {canUnreadNew ? t("notices.markUnread") : t("notices.markAllRead")}
           </button>
         )}
       </div>
       {notices.length === 0 ? (
-        <p className="notification-group">No notifications yet</p>
+        <p className="notification-group">{t("notices.empty")}</p>
       ) : (
         groups.map((group) => (
           <div key={group.label}>
@@ -512,8 +534,12 @@ function NotificationPanel({
                   {icon[notice.kind]}
                 </span>
                 <div>
-                  <p>{notice.text}</p>
-                  <small>{notice.time}</small>
+                  <p>{translateNotice(t, notice.text, notice.kind)}</p>
+                  <small>
+                    {notice.createdAt
+                      ? formatRelativeTime(t, notice.createdAt, dateLocale)
+                      : notice.time}
+                  </small>
                 </div>
               </button>
             ))}

@@ -44,7 +44,17 @@ import {
   paginate,
   pageForId,
 } from "@/components/primitives";
-import { AuthorizationDetail, ConfirmModal, RequestDetail } from "@/components/modals";
+import {
+  AuthorizationDetail,
+  ConfirmModal,
+  DepartmentModal,
+  RequestDetail,
+} from "@/components/modals";
+import {
+  AdminAttendance,
+  AdminAttendanceOverviewCard,
+  AttendanceScheduleSettings,
+} from "@/components/attendance-views";
 import {
   approvedAuthorizationMinutes,
   authorizationBalance,
@@ -73,6 +83,13 @@ import {
   deleteDepartmentRecord,
   deleteEmployeeRecord,
 } from "@/lib/delete-records";
+import {
+  formatDaysLabel,
+  screenLabel,
+  translateRole,
+  useLanguage,
+  useT,
+} from "@/lib/i18n";
 
 async function persistLeaveDecision(
   requestId: string,
@@ -320,9 +337,10 @@ async function decideRequest(
   flash: (message: string) => void,
   reload: () => Promise<void>,
   setBusyId: (id: string | null) => void,
+  t: ReturnType<typeof useT>,
 ) {
   if (!currentEmployee) {
-    flash("You must be signed in");
+    flash(t("profile.mustSignIn"));
     return;
   }
   setBusyId(requestId);
@@ -337,7 +355,7 @@ async function decideRequest(
     return;
   }
   await reload();
-  flash(status === "approved" ? "Request approved" : "Request rejected");
+  flash(status === "approved" ? t("admin.approved") : t("admin.rejected"));
   setBusyId(null);
 }
 
@@ -348,9 +366,10 @@ async function decideAuthorization(
   flash: (message: string) => void,
   reload: () => Promise<void>,
   setBusyId: (id: string | null) => void,
+  t: ReturnType<typeof useT>,
 ) {
   if (!currentEmployee) {
-    flash("You must be signed in");
+    flash(t("profile.mustSignIn"));
     return;
   }
   setBusyId(requestId);
@@ -368,17 +387,18 @@ async function decideAuthorization(
   if (status === "approved" && result.vacationDaysTaken > 0) {
     flash(
       result.vacationDaysTaken === 1
-        ? "Request approved. 1 vacation day deducted for time over 8h."
-        : `Request approved. ${result.vacationDaysTaken} vacation days deducted for time over 8h.`,
+        ? t("admin.approvedOneDay")
+        : t("admin.approvedDays", { count: result.vacationDaysTaken }),
     );
   } else {
-    flash(status === "approved" ? "Request approved" : "Request rejected");
+    flash(status === "approved" ? t("admin.approved") : t("admin.rejected"));
   }
   setBusyId(null);
 }
 
 export function AdminView({
   active,
+  setActive,
   requests,
   authorizations,
   setRequests,
@@ -401,6 +421,7 @@ export function AdminView({
   reload,
 }: {
   active: string;
+  setActive: (label: string) => void;
   requests: LeaveRequest[];
   authorizations: Authorization[];
   setRequests: (requests: LeaveRequest[]) => void;
@@ -450,6 +471,7 @@ export function AdminView({
         setEmployees={setEmployees}
         setModal={setModal}
         flash={flash}
+        reload={reload}
       />
     );
   }
@@ -482,12 +504,30 @@ export function AdminView({
       />
     );
   }
+  if (active === "Attendance") {
+    return (
+      <AdminAttendance
+        employees={employees}
+        departments={departments}
+        flash={flash}
+        focusCorrectionId={
+          noticeFocus?.tab === "attendance" ? noticeFocus.id : null
+        }
+        onNoticeFocusHandled={onNoticeFocusHandled}
+      />
+    );
+  }
   if (active === "Analytics") {
     return <Analytics requests={requests} employees={employees} />;
   }
   if (active === "Settings") {
     return (
-      <SettingsView leaveTypes={leaveTypes} departments={departments} />
+      <SettingsView
+        leaveTypes={leaveTypes}
+        departments={departments}
+        employees={employees}
+        flash={flash}
+      />
     );
   }
   return (
@@ -501,6 +541,7 @@ export function AdminView({
       employees={employees}
       flash={flash}
       reload={reload}
+      onOpenAttendance={() => setActive("Attendance")}
     />
   );
 }
@@ -513,6 +554,7 @@ function Dashboard({
   employees,
   flash,
   reload,
+  onOpenAttendance,
 }: {
   pending: number;
   navigate: (path: string) => void;
@@ -521,11 +563,13 @@ function Dashboard({
   employees: Employee[];
   flash: (message: string) => void;
   reload: () => Promise<void>;
+  onOpenAttendance: () => void;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingApprove, setPendingApprove] = useState<LeaveRequest | null>(
     null,
   );
+  const { t, dateLocale } = useLanguage();
   const now = new Date();
   const today = isoDate(now);
   const year = String(now.getFullYear());
@@ -535,7 +579,11 @@ function Dashboard({
   const hello = currentEmployee ? firstName(currentEmployee.name) : "";
   const hour = now.getHours();
   const greeting =
-    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    hour < 12
+      ? t("admin.greetingMorning")
+      : hour < 18
+        ? t("admin.greetingAfternoon")
+        : t("admin.greetingEvening");
   const onLeave = requests.filter(
     (request) =>
       request.status === "Approved" &&
@@ -611,7 +659,7 @@ function Dashboard({
       return b.localeCompare(a);
     })
     .slice(0, 8);
-  const dateLabel = now.toLocaleDateString("en-US", {
+  const dateLabel = now.toLocaleDateString(dateLocale, {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -627,60 +675,59 @@ function Dashboard({
             {greeting}
             {hello ? `, ${hello}` : ""}
           </h1>
-          <p className="page-subtitle">
-            Here&apos;s what&apos;s happening with your team today.
-          </p>
+          <p className="page-subtitle">{t("admin.subtitle")}</p>
         </div>
       </section>
       <section className="metric-grid">
         <Metric
-          label="Team members"
+          label={t("admin.teamMembers")}
           value={String(employees.length)}
-          note="In your workspace"
+          note={t("admin.inWorkspace")}
           tone="indigo"
           icon={<Users size={19} />}
         />
         <Metric
-          label="On leave today"
+          label={t("admin.onLeaveToday")}
           value={String(onLeave)}
           note={
             onLeave === 1
-              ? "1 approved leave covering today"
-              : `${onLeave} approved leaves covering today`
+              ? t("admin.onLeaveOne")
+              : t("admin.onLeaveMany", { count: onLeave })
           }
           tone="teal"
           icon={<Palmtree size={19} />}
         />
         <Metric
-          label="Pending approvals"
+          label={t("admin.pendingApprovals")}
           value={String(pending)}
           note={
             pendingThisWeek === 1
-              ? "1 submitted this week"
-              : `${pendingThisWeek} submitted this week`
+              ? t("admin.submittedOne")
+              : t("admin.submittedMany", { count: pendingThisWeek })
           }
           tone="amber"
           icon={<Clock3 size={19} />}
           trend={pendingTrend}
         />
         <Metric
-          label="Leave taken"
+          label={t("admin.leaveTaken")}
           value={String(daysTaken)}
           note={
             daysTaken === 1
-              ? "1 approved day this year"
-              : `${daysTaken} approved days this year`
+              ? t("admin.takenOne")
+              : t("admin.takenMany", { count: daysTaken })
           }
           tone="rose"
           icon={<Activity size={19} />}
           trend={leaveTakenTrend}
         />
       </section>
+      <AdminAttendanceOverviewCard onOpen={onOpenAttendance} />
       <div className="card table-card">
         <div className="card-heading">
-          <h2>Recent leave requests</h2>
+          <h2>{t("admin.recent")}</h2>
           <button type="button" onClick={() => navigate("/admin")}>
-            View all <ChevronRight size={14} />
+            {t("admin.viewAll")} <ChevronRight size={14} />
           </button>
         </div>
         {recent.map((request) => {
@@ -726,15 +773,19 @@ function Dashboard({
           );
         })}
         {recent.length === 0 && (
-          <div className="table-empty">No leave requests yet.</div>
+          <div className="table-empty">{t("requests.emptyLeaves")}</div>
         )}
       </div>
       {pendingApprove && (
         <ConfirmModal
-          title="Approve request"
-          message={`Approve ${pendingApprove.name}'s ${pendingApprove.type} request for ${pendingApprove.dates}?`}
-          confirmLabel="Approve"
-          cancelLabel="Go back"
+          title={t("admin.approveTitle")}
+          message={t("admin.approveLeave", {
+            name: pendingApprove.name,
+            type: pendingApprove.type,
+            dates: pendingApprove.dates,
+          })}
+          confirmLabel={t("common.approve")}
+          cancelLabel={t("admin.goBack")}
           danger={false}
           close={() => setPendingApprove(null)}
           confirm={async () => {
@@ -745,6 +796,7 @@ function Dashboard({
               flash,
               reload,
               setBusyId,
+              t,
             );
             setPendingApprove(null);
           }}
@@ -783,6 +835,7 @@ function People({
   currentEmployee: Employee | null;
   flash: (message: string) => void;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("All");
   const [page, setPage] = useState(1);
@@ -810,11 +863,11 @@ function People({
   return (
     <>
       <Header
-        eyebrow="Admin / Directory"
-        title="Employees"
+        eyebrow={t("admin.directory")}
+        title={t("admin.employees")}
         action={
           <Button onClick={() => setModal("employee")}>
-            <UserPlus size={16} /> Add employee
+            <UserPlus size={16} /> {t("admin.addEmployee")}
           </Button>
         }
       />
@@ -837,11 +890,11 @@ function People({
         />
         {filtered.length > 0 && (
           <div className="employee-row people-row people-head">
-            <span>Employee</span>
-            <span>Email</span>
-            <span>Phone</span>
-            <span>Department</span>
-            <span>Vacation balance</span>
+            <span>{t("admin.colEmployee")}</span>
+            <span>{t("admin.colEmail")}</span>
+            <span>{t("admin.colPhone")}</span>
+            <span>{t("filter.department")}</span>
+            <span>{t("admin.colVacation")}</span>
             <span />
           </div>
         )}
@@ -856,17 +909,21 @@ function People({
                 <div>
                   <b>{employee.name}</b>
                   <span>
-                    {employee.role}
+                    {translateRole(t, employee.role)}
                     {employee.jobTitle ? ` · ${employee.jobTitle}` : ""}
                   </span>
                 </div>
               </div>
               <span>{employee.email}</span>
               <span>{displayValue(employee.phone)}</span>
-              <span>{employee.department}</span>
+              <span>
+                {employee.department === "Unassigned"
+                  ? t("department.unassigned")
+                  : employee.department}
+              </span>
               <div className="leave-balance-list">
                 {solde.length === 0 ? (
-                  <span className="leave-balance-empty">Not set</span>
+                  <span className="leave-balance-empty">{t("admin.notSet")}</span>
                 ) : (
                   solde.map((balance) => (
                     <span
@@ -878,7 +935,10 @@ function People({
                             ? "is-empty"
                             : ""
                       }`}
-                      title={`${displayLeaveType(balance.typeName)}: ${balance.daysRemaining} days remaining`}
+                      title={t("admin.balanceTitle", {
+                        type: displayLeaveType(balance.typeName),
+                        days: balance.daysRemaining,
+                      })}
                     >
                       <span>
                         {displayLeaveType(balance.typeName)
@@ -917,9 +977,9 @@ function People({
       </div>
       {pendingDelete && (
         <ConfirmModal
-          title="Delete employee"
-          message={`Remove ${pendingDelete.name} from the directory? This cannot be undone.`}
-          confirmLabel="Delete"
+          title={t("admin.deleteEmployee")}
+          message={t("admin.deleteEmployeeMsg", { name: pendingDelete.name })}
+          confirmLabel={t("common.delete")}
           close={() => setPendingDelete(null)}
           confirm={async () => {
             const message = await deleteEmployeeRecord(pendingDelete.id);
@@ -940,7 +1000,12 @@ function People({
             setDepartments(
               departments.map((department) => ({
                 ...department,
+                managerId:
+                  department.managerId === pendingDelete.id
+                    ? null
+                    : department.managerId,
                 manager:
+                  department.managerId === pendingDelete.id ||
                   department.manager === pendingDelete.name
                     ? "Unassigned"
                     : department.manager,
@@ -951,7 +1016,7 @@ function People({
             );
             setSelected(null);
             setPendingDelete(null);
-            flash("Employee removed");
+            flash(t("admin.employeeRemoved"));
           }}
         />
       )}
@@ -982,6 +1047,7 @@ function Requests({
   noticeFocus?: NoticeFocus | null;
   onNoticeFocusHandled?: () => void;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [tab, setTab] = useState<RequestTab>("leaves");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1059,7 +1125,7 @@ function Requests({
   }, [query, status, type, startFrom, endTo, tab]);
 
   useEffect(() => {
-    if (!noticeFocus) return;
+    if (!noticeFocus || noticeFocus.tab === "attendance") return;
     skipClear.current = true;
     setQuery("");
     setStatus("All");
@@ -1088,7 +1154,11 @@ function Requests({
 
   return (
     <>
-      <Header eyebrow="Admin / Manage" title="Leave requests" action={null} />
+      <Header
+        eyebrow={t("admin.manage")}
+        title={screenLabel(t, "Leave requests")}
+        action={null}
+      />
       <div className="request-tabs-row">
         <RequestTabs value={tab} onChange={setTab} />
       </div>
@@ -1129,12 +1199,12 @@ function Requests({
         />
         {rows.length > 0 && (
           <div className="employee-row requests-row people-head">
-            <span>Employee</span>
-            <span>Type</span>
-            <span>Dates</span>
-            <span>Duration</span>
-            <span>Department</span>
-            <span>Status</span>
+            <span>{t("admin.colEmployee")}</span>
+            <span>{t("admin.colType")}</span>
+            <span>{t("admin.colDates")}</span>
+            <span>{t("admin.colDuration")}</span>
+            <span>{t("filter.department")}</span>
+            <span>{t("filter.status")}</span>
             <span />
           </div>
         )}
@@ -1176,7 +1246,11 @@ function Requests({
               <LeaveTypeLabel type={request.type} />
               <span>{request.dates}</span>
               <span>{request.days}</span>
-              <span>{request.department}</span>
+              <span>
+                {request.department === "Unassigned"
+                  ? t("department.unassigned")
+                  : request.department}
+              </span>
               <Status status={request.status} />
               <div
                 className="row-actions"
@@ -1184,7 +1258,7 @@ function Requests({
               >
                 <button
                   type="button"
-                  aria-label={`View ${request.name} request`}
+                  aria-label={t("admin.viewRequest", { name: request.name })}
                   onClick={() => setSelectedId(request.id)}
                 >
                   <Eye size={14} />
@@ -1193,7 +1267,7 @@ function Requests({
                   <>
                     <button
                       type="button"
-                      aria-label={`Approve ${request.name}`}
+                      aria-label={t("admin.approveName", { name: request.name })}
                       disabled={busyId === request.id}
                       onClick={() => setPendingApprove(request)}
                     >
@@ -1201,7 +1275,7 @@ function Requests({
                     </button>
                     <button
                       type="button"
-                      aria-label={`Reject ${request.name}`}
+                      aria-label={t("admin.rejectName", { name: request.name })}
                       disabled={busyId === request.id}
                       onClick={() => setPendingReject(request)}
                     >
@@ -1216,8 +1290,8 @@ function Requests({
         {rows.length === 0 && (
           <div className="table-empty">
             {requests.length === 0
-              ? "No leave requests yet."
-              : "No leave requests match these filters."}
+              ? t("requests.emptyLeaves")
+              : t("requests.emptyLeavesFiltered")}
           </div>
         )}
         <Pagination
@@ -1256,12 +1330,12 @@ function Requests({
         />
         {authzRows.length > 0 && (
           <div className="employee-row authz-requests-row people-head">
-            <span>Employee</span>
-            <span>Duration</span>
-            <span>Date</span>
-            <span>Times</span>
-            <span>Reason</span>
-            <span>Status</span>
+            <span>{t("admin.colEmployee")}</span>
+            <span>{t("admin.colDuration")}</span>
+            <span>{t("att.colDate")}</span>
+            <span>{t("admin.colTimes")}</span>
+            <span>{t("admin.colReason")}</span>
+            <span>{t("filter.status")}</span>
             <span />
           </div>
         )}
@@ -1301,7 +1375,7 @@ function Requests({
                 </div>
               </div>
               <span>{request.durationLabel}</span>
-              <span>{formatDisplayDate(request.date)}</span>
+              <span>{formatDisplayDate(request.date, dateLocale)}</span>
               <span>{request.timesLabel}</span>
               <span className="authz-reason">{request.reason}</span>
               <Status status={request.status} />
@@ -1311,7 +1385,7 @@ function Requests({
               >
                 <button
                   type="button"
-                  aria-label={`View ${request.name} authorization`}
+                  aria-label={t("admin.viewAuthz", { name: request.name })}
                   onClick={() => setSelectedId(request.id)}
                 >
                   <Eye size={14} />
@@ -1320,7 +1394,7 @@ function Requests({
                   <>
                     <button
                       type="button"
-                      aria-label={`Approve ${request.name}`}
+                      aria-label={t("admin.approveName", { name: request.name })}
                       disabled={busyId === request.id}
                       onClick={() => setPendingApproveAuthz(request)}
                     >
@@ -1328,7 +1402,7 @@ function Requests({
                     </button>
                     <button
                       type="button"
-                      aria-label={`Reject ${request.name}`}
+                      aria-label={t("admin.rejectName", { name: request.name })}
                       disabled={busyId === request.id}
                       onClick={() => setPendingRejectAuthz(request)}
                     >
@@ -1343,8 +1417,8 @@ function Requests({
         {authzRows.length === 0 && (
           <div className="table-empty">
             {authorizations.length === 0
-              ? "No authorizations yet."
-              : "No authorizations match these filters."}
+              ? t("requests.emptyAuthz")
+              : t("requests.emptyAuthzFiltered")}
           </div>
         )}
         <Pagination
@@ -1359,10 +1433,14 @@ function Requests({
       )}
       {pendingApprove && (
         <ConfirmModal
-          title="Approve request"
-          message={`Approve ${pendingApprove.name}'s ${pendingApprove.type} request for ${pendingApprove.dates}?`}
-          confirmLabel="Approve"
-          cancelLabel="Go back"
+          title={t("admin.approveTitle")}
+          message={t("admin.approveLeave", {
+            name: pendingApprove.name,
+            type: pendingApprove.type,
+            dates: pendingApprove.dates,
+          })}
+          confirmLabel={t("common.approve")}
+          cancelLabel={t("admin.goBack")}
           danger={false}
           close={() => setPendingApprove(null)}
           confirm={async () => {
@@ -1373,6 +1451,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             );
             setPendingApprove(null);
           }}
@@ -1380,10 +1459,14 @@ function Requests({
       )}
       {pendingReject && (
         <ConfirmModal
-          title="Reject request"
-          message={`Reject ${pendingReject.name}'s ${pendingReject.type} request for ${pendingReject.dates}?`}
-          confirmLabel="Reject"
-          cancelLabel="Go back"
+          title={t("admin.rejectTitle")}
+          message={t("admin.rejectLeave", {
+            name: pendingReject.name,
+            type: pendingReject.type,
+            dates: pendingReject.dates,
+          })}
+          confirmLabel={t("common.reject")}
+          cancelLabel={t("admin.goBack")}
           close={() => setPendingReject(null)}
           confirm={async () => {
             await decideRequest(
@@ -1393,6 +1476,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             );
             setPendingReject(null);
           }}
@@ -1400,14 +1484,23 @@ function Requests({
       )}
       {pendingApproveAuthz && (
         <ConfirmModal
-          title="Approve request"
+          title={t("admin.approveTitle")}
           message={
             pendingAuthzVacationDays > 0
-              ? `Approve ${pendingApproveAuthz.name}'s authorization for ${formatDisplayDate(pendingApproveAuthz.date)} (${pendingApproveAuthz.durationLabel})? This takes ${pendingAuthzVacationDays} vacation day${pendingAuthzVacationDays === 1 ? "" : "s"} because they will be over the free 8h.`
-              : `Approve ${pendingApproveAuthz.name}'s authorization for ${formatDisplayDate(pendingApproveAuthz.date)} (${pendingApproveAuthz.durationLabel})?`
+              ? t("admin.approveAuthzDays", {
+                  name: pendingApproveAuthz.name,
+                  date: formatDisplayDate(pendingApproveAuthz.date, dateLocale),
+                  duration: pendingApproveAuthz.durationLabel,
+                  days: pendingAuthzVacationDays,
+                })
+              : t("admin.approveAuthz", {
+                  name: pendingApproveAuthz.name,
+                  date: formatDisplayDate(pendingApproveAuthz.date, dateLocale),
+                  duration: pendingApproveAuthz.durationLabel,
+                })
           }
-          confirmLabel="Approve"
-          cancelLabel="Go back"
+          confirmLabel={t("common.approve")}
+          cancelLabel={t("admin.goBack")}
           danger={false}
           close={() => setPendingApproveAuthz(null)}
           confirm={async () => {
@@ -1418,6 +1511,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             );
             setPendingApproveAuthz(null);
           }}
@@ -1425,10 +1519,14 @@ function Requests({
       )}
       {pendingRejectAuthz && (
         <ConfirmModal
-          title="Reject request"
-          message={`Reject ${pendingRejectAuthz.name}'s authorization for ${formatDisplayDate(pendingRejectAuthz.date)} (${pendingRejectAuthz.durationLabel})?`}
-          confirmLabel="Reject"
-          cancelLabel="Go back"
+          title={t("admin.rejectTitle")}
+          message={t("admin.rejectAuthz", {
+            name: pendingRejectAuthz.name,
+            date: formatDisplayDate(pendingRejectAuthz.date, dateLocale),
+            duration: pendingRejectAuthz.durationLabel,
+          })}
+          confirmLabel={t("common.reject")}
+          cancelLabel={t("admin.goBack")}
           close={() => setPendingRejectAuthz(null)}
           confirm={async () => {
             await decideAuthorization(
@@ -1438,6 +1536,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             );
             setPendingRejectAuthz(null);
           }}
@@ -1460,6 +1559,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             )
           }
           onReject={() =>
@@ -1470,6 +1570,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             )
           }
         />
@@ -1494,6 +1595,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             )
           }
           onReject={() =>
@@ -1504,6 +1606,7 @@ function Requests({
               flash,
               reload,
               setBusyId,
+              t,
             )
           }
         />
@@ -1519,6 +1622,7 @@ function Departments({
   setEmployees,
   setModal,
   flash,
+  reload,
 }: {
   departments: Department[];
   setDepartments: (departments: Department[]) => void;
@@ -1526,17 +1630,20 @@ function Departments({
   setEmployees: (employees: Employee[]) => void;
   setModal: (modal: ModalKind) => void;
   flash: (message: string) => void;
+  reload: () => Promise<void>;
 }) {
+  const t = useT();
   const [pendingDelete, setPendingDelete] = useState<Department | null>(null);
+  const [editing, setEditing] = useState<Department | null>(null);
 
   return (
     <>
       <Header
-        eyebrow="Admin / Workspace"
-        title="Departments"
+        eyebrow={t("admin.departmentsEyebrow")}
+        title={screenLabel(t, "Departments")}
         action={
           <Button onClick={() => setModal("department")}>
-            <Plus size={16} /> Add department
+            <Plus size={16} /> {t("admin.addDepartment")}
           </Button>
         }
       />
@@ -1548,7 +1655,11 @@ function Departments({
                 <Building2 size={18} />
               </div>
               <div className="row-actions">
-                <button>
+                <button
+                  type="button"
+                  aria-label={t("modal.editDeptTitle")}
+                  onClick={() => setEditing(department)}
+                >
                   <Pencil size={14} />
                 </button>
                 <button
@@ -1560,19 +1671,36 @@ function Departments({
               </div>
             </div>
             <h3>{department.name}</h3>
-            <p>{department.count} employees</p>
+            <p>{t("admin.employeeCount", { count: department.count })}</p>
             <div className="department-manager">
-              <span>Manager</span>
-              <b>{department.manager}</b>
+              <span>{t("admin.manager")}</span>
+              <b>
+                {department.manager === "Unassigned"
+                  ? t("department.unassigned")
+                  : department.manager}
+              </b>
             </div>
           </div>
         ))}
       </div>
+      {editing && (
+        <DepartmentModal
+          department={editing}
+          employees={employees}
+          close={() => setEditing(null)}
+          flash={flash}
+          onSaved={async () => {
+            setEditing(null);
+            await reload();
+            flash(t("toast.departmentUpdated"));
+          }}
+        />
+      )}
       {pendingDelete && (
         <ConfirmModal
-          title="Delete department"
-          message={`Remove ${pendingDelete.name}? Employees in this department will keep their records.`}
-          confirmLabel="Delete"
+          title={t("admin.deleteDepartment")}
+          message={t("admin.deleteDepartmentMsg", { name: pendingDelete.name })}
+          confirmLabel={t("common.delete")}
           close={() => setPendingDelete(null)}
           confirm={async () => {
             const message = await deleteDepartmentRecord(pendingDelete.id);
@@ -1595,7 +1723,7 @@ function Departments({
               departments.filter((item) => item.id !== pendingDelete.id),
             );
             setPendingDelete(null);
-            flash("Department removed");
+            flash(t("admin.departmentRemoved"));
           }}
         />
       )}
@@ -1622,6 +1750,7 @@ export function Calendar({
   canAddEvent?: boolean;
   eyebrow?: string;
 }) {
+  const { t, dateLocale } = useLanguage();
   const [cursor, setCursor] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
@@ -1685,21 +1814,35 @@ export function Calendar({
   });
   const trail = (7 - (cells.length % 7)) % 7;
   const grid = [...cells, ...Array.from({ length: trail }, () => null)];
-  const monthLabel = cursor.toLocaleDateString("en-US", {
+  const monthLabel = cursor.toLocaleDateString(dateLocale, {
     month: "long",
     year: "numeric",
   });
-  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const weekdays = [
+    t("cal.mon"),
+    t("cal.tue"),
+    t("cal.wed"),
+    t("cal.thu"),
+    t("cal.fri"),
+    t("cal.sat"),
+    t("cal.sun"),
+  ];
+  const eyebrowLabel =
+    eyebrow === "Admin / Planning"
+      ? t("admin.planning")
+      : eyebrow === "My workspace"
+        ? t("employee.workspace")
+        : eyebrow;
 
   return (
     <>
       <Header
-        eyebrow={eyebrow}
-        title="Team calendar"
+        eyebrow={eyebrowLabel}
+        title={screenLabel(t, "Team calendar")}
         action={
           canAddEvent ? (
             <Button onClick={() => setModal("event")}>
-              <Plus size={16} /> Add event
+              <Plus size={16} /> {t("admin.addEvent")}
             </Button>
           ) : null
         }
@@ -1709,7 +1852,7 @@ export function Calendar({
           <button
             type="button"
             className="calendar-nav"
-            aria-label="Previous month"
+            aria-label={t("cal.prevMonth")}
             onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
           >
             <ChevronLeft size={16} />
@@ -1718,7 +1861,7 @@ export function Calendar({
           <button
             type="button"
             className="calendar-nav"
-            aria-label="Next month"
+            aria-label={t("cal.nextMonth")}
             onClick={() => setCursor(new Date(year, monthIndex + 1, 1))}
           >
             <ChevronRight size={16} />
@@ -1729,7 +1872,7 @@ export function Calendar({
               value={department}
               onChange={(event) => setDepartment(event.target.value)}
             >
-              <option value="All">All departments</option>
+              <option value="All">{t("admin.allDepartments")}</option>
               {departments.map((item) => (
                 <option key={item.id} value={item.name}>
                   {item.name}
@@ -1739,9 +1882,9 @@ export function Calendar({
           )}
           <span className="calendar-legend">
             <i className="legend-leave" />
-            Leave <i className="legend-authz" />
-            Authorization <i className="legend-event" />
-            Holiday
+            {t("admin.legendLeave")} <i className="legend-authz" />
+            {t("admin.legendAuthz")} <i className="legend-event" />
+            {t("admin.legendHoliday")}
           </span>
         </div>
         <div className="month-weekdays">
@@ -1763,6 +1906,7 @@ export function Calendar({
               approvedLeaves,
               approvedAuthz,
               employees,
+              t("admin.legendAuthz"),
             );
             return (
               <div
@@ -1818,6 +1962,7 @@ function dayAwayChips(
   leaves: LeaveRequest[],
   auths: Authorization[],
   employees: Employee[],
+  authzLabel: string,
 ) {
   const leaveChips = leaves
     .filter((request) => request.startDate <= iso && request.endDate >= iso)
@@ -1842,7 +1987,7 @@ function dayAwayChips(
         id: `authz-${item.id}`,
         className: "authz-bar",
         label: `${firstName(name)} · ${item.durationLabel}`,
-        title: `${name} · Authorization · ${item.durationLabel}`,
+        title: `${name} · ${authzLabel} · ${item.durationLabel}`,
       };
     });
   return [...leaveChips, ...authzChips];
@@ -1855,6 +2000,7 @@ function Analytics({
   requests: LeaveRequest[];
   employees: Employee[];
 }) {
+  const { t, dateLocale } = useLanguage();
   const year = new Date().getFullYear();
   const yearPrefix = String(year);
   const thisYear = requests.filter((request) =>
@@ -1895,67 +2041,66 @@ function Analytics({
       );
   });
   const maxMonth = Math.max(...monthDays, 1);
-  const monthNames = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
+  const monthNames = Array.from({ length: 12 }, (_, index) =>
+    new Date(year, index, 1).toLocaleDateString(dateLocale, { month: "short" }),
+  );
 
   return (
     <>
-      <Header eyebrow="Admin / Insights" title="Analytics" action={null} />
+      <Header
+        eyebrow={t("admin.insights")}
+        title={screenLabel(t, "Analytics")}
+        action={null}
+      />
       <div className="metric-grid">
         <Metric
-          label="Leave utilization"
+          label={t("admin.utilization")}
           value={`${utilization}%`}
-          note={`${daysTaken} of ${Math.round(entitlement)} entitled days this year`}
+          note={t("admin.utilizationNote", {
+            taken: daysTaken,
+            entitled: Math.round(entitlement),
+          })}
           tone="indigo"
           icon={<Activity size={19} />}
         />
         <Metric
-          label="Average request"
+          label={t("admin.average")}
           value={approved.length === 0 ? "0d" : `${average.toFixed(1)}d`}
-          note={`${approved.length} approved this year`}
+          note={t("admin.averageNote", { count: approved.length })}
           tone="teal"
           icon={<Clock3 size={19} />}
         />
         <Metric
-          label="Approval rate"
+          label={t("admin.approvalRate")}
           value={`${approvalRate}%`}
-          note={`${approved.length} approved of ${decided.length} decided`}
+          note={t("admin.approvalRateNote", {
+            approved: approved.length,
+            decided: decided.length,
+          })}
           tone="amber"
           icon={<Check size={19} />}
         />
         <Metric
-          label="Pending approvals"
+          label={t("admin.pendingApprovals")}
           value={String(pending)}
-          note="Open leave requests"
+          note={t("admin.openRequests")}
           tone="rose"
           icon={<Activity size={19} />}
         />
       </div>
       <div className="card chart-card">
         <div className="card-heading">
-          <h2>Leave days by month</h2>
+          <h2>{t("admin.daysByMonth")}</h2>
           <span>{year}</span>
         </div>
         {daysTaken === 0 ? (
-          <div className="table-empty">No approved leave this year.</div>
+          <div className="table-empty">{t("admin.noApproved")}</div>
         ) : (
-          <div className="month-chart" role="img" aria-label="Approved leave days by month">
+          <div className="month-chart" role="img" aria-label={t("admin.daysByMonth")}>
             {monthDays.map((days, index) => (
               <div
-                key={monthNames[index]}
-                title={`${monthNames[index]}: ${days} ${days === 1 ? "day" : "days"}`}
+                key={`${year}-${index}`}
+                title={`${monthNames[index]}: ${formatDaysLabel(t, days)}`}
               >
                 <span style={{ height: `${Math.max(6, (days / maxMonth) * 100)}%` }} />
                 <small>
@@ -1974,61 +2119,75 @@ function Analytics({
 function SettingsView({
   leaveTypes,
   departments,
+  employees,
+  flash,
 }: {
   leaveTypes: LeaveType[];
   departments: Department[];
+  employees: Employee[];
+  flash: (message: string) => void;
 }) {
+  const t = useT();
   const [tab, setTab] = useState("Company Profile");
+  const settingsTabs = [
+    { id: "Company Profile", label: t("admin.companyProfile") },
+    { id: "Leave Policy", label: t("admin.leavePolicy") },
+    { id: "Attendance", label: t("nav.attendance") },
+    { id: "Departments", label: screenLabel(t, "Departments") },
+    { id: "Roles & Permissions", label: t("admin.roles") },
+  ];
+  const tabLabel =
+    settingsTabs.find((item) => item.id === tab)?.label ?? tab;
 
   return (
     <>
-      <Header eyebrow="Workspace / Settings" title="Settings" action={null} />
+      <Header
+        eyebrow={t("admin.settingsEyebrow")}
+        title={screenLabel(t, "Settings")}
+        action={null}
+      />
       <div className="card settings-card">
         <nav className="settings-nav">
-          {[
-            "Company Profile",
-            "Leave Policy",
-            "Departments",
-            "Roles & Permissions",
-          ].map((item) => (
+          {settingsTabs.map((item) => (
             <button
-              className={tab === item ? "active" : ""}
-              key={item}
-              onClick={() => setTab(item)}
+              className={tab === item.id ? "active" : ""}
+              key={item.id}
+              onClick={() => setTab(item.id)}
             >
-              {item}
+              {item.label}
             </button>
           ))}
         </nav>
         <div className="settings-form">
-          <p className="eyebrow">Configuration</p>
-          <h2>{tab}</h2>
+          <p className="eyebrow">{t("admin.configuration")}</p>
+          <h2>{tabLabel}</h2>
           {tab === "Company Profile" && (
             <>
-              <Field label="Company name" value="Kachabiti" readOnly />
-              <p className="page-subtitle">
-                Workspace branding is fixed for this company.
-              </p>
+              <Field label={t("admin.companyName")} value="Kachabiti" readOnly />
+              <p className="page-subtitle">{t("admin.brandingFixed")}</p>
             </>
           )}
           {tab === "Leave Policy" &&
             (leaveTypes.length === 0 ? (
-              <p className="page-subtitle">No leave types in the catalog yet.</p>
+              <p className="page-subtitle">{t("admin.noLeaveTypes")}</p>
             ) : (
               leaveTypes.map((type) => (
                 <Field
                   key={type.id}
                   label={displayLeaveType(type.name)}
-                  value={`${type.defaultDays} day${type.defaultDays === 1 ? "" : "s"}`}
+                  value={t("admin.policyDays", { days: type.defaultDays })}
                   readOnly
                 />
               ))
             ))}
+          {tab === "Attendance" && (
+            <AttendanceScheduleSettings employees={employees} flash={flash} />
+          )}
           {tab === "Roles & Permissions" &&
             [
-              "Administrator · Full access",
-              "Manager · Approve team leave",
-              "Employee · Self-service access",
+              t("admin.roleAdmin"),
+              t("admin.roleManager"),
+              t("admin.roleEmployee"),
             ].map((item) => (
               <div className="permission-row" key={item}>
                 <ShieldCheck size={16} />
@@ -2037,15 +2196,19 @@ function SettingsView({
             ))}
           {tab === "Departments" &&
             (departments.length === 0 ? (
-              <p className="page-subtitle">
-                No departments yet. Add them from the Departments page.
-              </p>
+              <p className="page-subtitle">{t("admin.noDepartments")}</p>
             ) : (
               departments.map((department) => (
                 <Field
                   key={department.id}
                   label={department.name}
-                  value={`${department.count} people · ${department.manager}`}
+                  value={t("admin.deptRow", {
+                    count: department.count,
+                    manager:
+                      department.manager === "Unassigned"
+                        ? t("department.unassigned")
+                        : department.manager,
+                  })}
                   readOnly
                 />
               ))

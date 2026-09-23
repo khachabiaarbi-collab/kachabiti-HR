@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Clock3 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminView } from "@/components/admin-views";
 import { EmployeeNav, Sidebar, TopActions } from "@/components/app-chrome";
@@ -17,6 +17,7 @@ import {
   RequestModal,
 } from "@/components/modals";
 import { Logo } from "@/components/primitives";
+import { screenLabel, translateRole, useT } from "@/lib/i18n";
 import type {
   Authorization,
   CompanyEvent,
@@ -50,6 +51,30 @@ import {
   type NotificationRow,
 } from "@/lib/map-rows";
 
+const NOTICE_SELECTS = [
+  "id, type, message, read, created_at, user_id, attendance_correction_id",
+  "id, type, message, read, created_at, user_id, leave_request_id, authorization_id, attendance_correction_id",
+  "id, type, message, read, created_at, user_id, leave_request_id, authorization_id",
+  "id, type, message, read, created_at, user_id",
+];
+
+async function loadNotices(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+) {
+  for (const select of NOTICE_SELECTS) {
+    const { data, error } = await supabase
+      .from("notifications")
+      .select(select)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (!error) {
+      return ((data ?? []) as NotificationRow[]).map(mapNotice);
+    }
+  }
+  return [];
+}
+
 async function loadWorkspace() {
   const supabase = createClient();
   const {
@@ -64,7 +89,6 @@ async function loadWorkspace() {
     balancesRes,
     leaveTypesRes,
     eventsRes,
-    noticesRes,
     authorizationsRes,
   ] = await Promise.all([
     supabase
@@ -91,11 +115,6 @@ async function loadWorkspace() {
       .from("events")
       .select("id, title, start_date, end_date, type")
       .order("start_date"),
-    supabase
-      .from("notifications")
-      .select("id, type, message, read, created_at, user_id, leave_request_id, authorization_id")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
     supabase
       .from("authorizations")
       .select(
@@ -176,16 +195,7 @@ async function loadWorkspace() {
       return ((retry.data ?? []) as LeaveTypeRow[]).map(mapLeaveType);
     })(),
     events: ((eventsRes.data ?? []) as EventRow[]).map(mapEvent),
-    notices: await (async () => {
-      if (!noticesRes.error) {
-        return ((noticesRes.data ?? []) as NotificationRow[]).map(mapNotice);
-      }
-      const retry = await supabase
-        .from("notifications")
-        .select("id, type, message, read, created_at")
-        .order("created_at", { ascending: false });
-      return ((retry.data ?? []) as NotificationRow[]).map(mapNotice);
-    })(),
+    notices: await loadNotices(supabase, user.id),
     authorizations: authorizationRows.map((row) => {
       const mapped = mapAuthorization(
         row,
@@ -204,10 +214,60 @@ async function loadWorkspace() {
   };
 }
 
+const EMPLOYEE_VIEWS: Record<string, string> = {
+  overview: "Overview",
+  clock: "Time clock",
+  pointeuse: "Time clock",
+  requests: "My requests",
+  calendar: "Calendar",
+  profile: "My profile",
+};
+
+const ADMIN_VIEWS: Record<string, string> = {
+  overview: "Overview",
+  requests: "Leave requests",
+  calendar: "Team calendar",
+  attendance: "Attendance",
+  people: "People",
+  departments: "Departments",
+  analytics: "Analytics",
+  settings: "Settings",
+};
+
+function viewsForPath(pathname: string) {
+  return pathname.startsWith("/dashboard") ? EMPLOYEE_VIEWS : ADMIN_VIEWS;
+}
+
+function slugForLabel(pathname: string, label: string) {
+  return (
+    Object.entries(viewsForPath(pathname)).find(([, name]) => name === label)?.[0] ??
+    "overview"
+  );
+}
+
+function labelFromSearch(pathname: string, searchParams: URLSearchParams) {
+  if (searchParams.get("profile") === "1") return "My profile";
+  return viewsForPath(pathname)[searchParams.get("view") ?? ""] ?? "Overview";
+}
+
+function writeViewParam(label: string) {
+  const url = new URL(window.location.href);
+  const slug = slugForLabel(url.pathname, label);
+  if (slug === "overview") url.searchParams.delete("view");
+  else url.searchParams.set("view", slug);
+  url.searchParams.delete("profile");
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) {
+    window.history.replaceState({}, "", next);
+  }
+}
+
 export default function Page() {
+  const t = useT();
   const pathname = usePathname();
   const [path, setPath] = useState(pathname);
-  const [active, setActive] = useState("Overview");
+  const [active, setActiveState] = useState("Overview");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -224,15 +284,19 @@ export default function Page() {
   const [noticeFocus, setNoticeFocus] = useState<NoticeFocus | null>(null);
   const [globalSearch, setGlobalSearch] = useState("");
 
+  const setActive = (label: string) => {
+    setActiveState(label);
+    writeViewParam(label);
+  };
+
   useEffect(() => {
     const syncPath = () => {
       const url = new URL(window.location.href);
       setPath(url.pathname);
+      const label = labelFromSearch(url.pathname, url.searchParams);
+      setActiveState(label);
       if (url.searchParams.get("profile") === "1") {
-        setActive("My profile");
-        url.searchParams.delete("profile");
-        const next = `${url.pathname}${url.search}`;
-        window.history.replaceState({}, "", next);
+        writeViewParam(label);
       }
     };
     const onShow = (event: PageTransitionEvent) => {
@@ -375,14 +439,27 @@ export default function Page() {
   const role: Role = toUiRole(currentEmployee?.role, isEmployee ? "Employee" : "Admin");
 
   const openNotice = async (item: Notice) => {
+    const attendance =
+      Boolean(item.attendanceCorrectionId) ||
+      /attendance correction/i.test(item.text);
     const authorization =
       Boolean(item.authorizationId) || /authorization/i.test(item.text);
-    const focus: NoticeFocus = {
-      tab: authorization ? "authorizations" : "leaves",
-      id: item.authorizationId ?? item.leaveRequestId ?? null,
-    };
+    const focus: NoticeFocus = attendance
+      ? { tab: "attendance", id: item.attendanceCorrectionId ?? null }
+      : {
+          tab: authorization ? "authorizations" : "leaves",
+          id: item.authorizationId ?? item.leaveRequestId ?? null,
+        };
     setShowNotices(false);
-    setActive(isEmployee ? "My requests" : "Leave requests");
+    setActive(
+      attendance
+        ? isEmployee
+          ? "Time clock"
+          : "Attendance"
+        : isEmployee
+          ? "My requests"
+          : "Leave requests",
+    );
     setNoticeFocus(focus);
     await reload();
     setNoticeFocus({ ...focus });
@@ -441,9 +518,13 @@ export default function Page() {
         {!isEmployee && (
           <header className="topbar">
             <div className="breadcrumb">
-              <span className="breadcrumb-muted">{role} workspace</span>
+              <span className="breadcrumb-muted">
+                {t("chrome.workspaceBreadcrumb", {
+                  role: translateRole(t, role),
+                })}
+              </span>
               <ChevronRight size={14} />
-              <span>{active}</span>
+              <span>{screenLabel(t, active)}</span>
             </div>
             <TopActions
               role={role}
@@ -466,6 +547,14 @@ export default function Page() {
         {isEmployee && (
           <header className="employee-mobile-top">
             <Logo />
+            <button
+              type="button"
+              className={`mobile-clock-link ${active === "Time clock" ? "active" : ""}`}
+              onClick={() => setActive("Time clock")}
+            >
+              <Clock3 size={16} />
+              {t("nav.timeClock")}
+            </button>
             <TopActions
               role={role}
               logout={logout}
@@ -488,6 +577,7 @@ export default function Page() {
           {isEmployee ? (
             <EmployeeView
               active={active}
+              setActive={setActive}
               requests={requests}
               authorizations={authorizations}
               flash={flash}
@@ -503,6 +593,7 @@ export default function Page() {
           ) : (
             <AdminView
               active={active}
+              setActive={setActive}
               requests={requests}
               authorizations={authorizations}
               setRequests={setRequests}
@@ -544,7 +635,7 @@ export default function Page() {
           onSubmitted={async () => {
             setModal(null);
             await reload();
-            flash("Leave request submitted for approval");
+            flash(t("toast.leaveSubmitted"));
           }}
         />
       )}
@@ -557,7 +648,7 @@ export default function Page() {
           onSubmitted={async () => {
             setModal(null);
             await reload();
-            flash("Authorization submitted for approval");
+            flash(t("toast.authzSubmitted"));
           }}
         />
       )}
@@ -568,7 +659,7 @@ export default function Page() {
           onSaved={async () => {
             setModal(null);
             await reload();
-            flash("Company event added to calendar");
+            flash(t("toast.eventAdded"));
           }}
         />
       )}
@@ -580,7 +671,7 @@ export default function Page() {
           onSaved={async () => {
             setModal(null);
             await reload();
-            flash("Department added successfully");
+            flash(t("toast.departmentAdded"));
           }}
         />
       )}
@@ -592,7 +683,7 @@ export default function Page() {
           onInvited={async () => {
             setModal(null);
             await reload();
-            flash("Invite sent. They can set a password from their email.");
+            flash(t("toast.inviteSent"));
           }}
         />
       )}

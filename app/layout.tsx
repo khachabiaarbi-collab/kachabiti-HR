@@ -1,5 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import { cookies } from 'next/headers'
+import { LanguageProvider, type Locale } from '@/lib/i18n'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,11 +16,14 @@ export const viewport: Viewport = {
   userScalable: true,
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const stored = (await cookies()).get('kachabiti-locale')?.value
+  const locale: Locale = stored === 'fr' ? 'fr' : 'en'
+
   return (
-    <html lang="en" className="bg-background">
+    <html lang={locale} className="bg-background" suppressHydrationWarning>
       <body className="antialiased">
-        {children}
+        <LanguageProvider initialLocale={locale}>{children}</LanguageProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

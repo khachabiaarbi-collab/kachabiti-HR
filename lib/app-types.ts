@@ -59,6 +59,7 @@ export type Department = {
   id: string;
   name: string;
   manager: string;
+  managerId: string | null;
   count: number;
 };
 
@@ -71,10 +72,11 @@ export type Notice = {
   createdAt?: string;
   leaveRequestId?: string | null;
   authorizationId?: string | null;
+  attendanceCorrectionId?: string | null;
 };
 
 export type NoticeFocus = {
-  tab: RequestTab;
+  tab: RequestTab | "attendance";
   id: string | null;
 };
 
@@ -101,3 +103,11 @@ export type CompanyEvent = {
 };
 
 export type ModalKind = "request" | "authorization" | "event" | "department" | "employee";
+
+export type {
+  AttendanceCorrectionRequest,
+  AttendanceDaySummary,
+  AttendanceReportItem,
+  AttendanceSettings,
+  WorkSchedule,
+} from "@/lib/attendance";
