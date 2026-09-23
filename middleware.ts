@@ -28,7 +28,18 @@ export async function middleware(request: NextRequest) {
   }
 
   const replaceTo = (pathname: string) => {
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>location.replace(${JSON.stringify(pathname)})</script></head><body></body></html>`
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><script>
+(function () {
+  var hash = location.hash || "";
+  var params = new URLSearchParams(hash.charAt(0) === "#" ? hash.slice(1) : "");
+  var type = params.get("type");
+  if (params.get("access_token") && params.get("refresh_token") && (type === "invite" || type === "recovery")) {
+    location.replace("/reset-password" + (type === "invite" ? "?welcome=1" : "") + hash);
+    return;
+  }
+  location.replace(${JSON.stringify(pathname)});
+})();
+</script></head><body></body></html>`
     const res = new NextResponse(html, {
       status: 200,
       headers: {

@@ -453,7 +453,7 @@ export function soldeGoesNegative(
   return remaining - requestedDays < 0;
 }
 
-export const DEFAULT_MONTHLY_LEAVE_DAYS = 1.75;
+export const DEFAULT_MONTHLY_LEAVE_DAYS = 1.5;
 
 function leaveTypeCode(type: { code?: string | null }) {
   return (type.code ?? "").trim().toUpperCase();

@@ -1,17 +1,17 @@
 -- Run in the Supabase SQL editor.
--- Per-employee monthly annual rate (default 1.75 = 21/12).
+-- Per-employee monthly annual rate (default 1.5 = 18/12).
 -- Annual solde = months worked since hire × rate, capped at rate × 12.
 -- Sick (and other non-annual types) get the full yearly default, not monthly.
 -- Unpaid stays 0. A future start date gets 0 annual days.
 
 alter table public.employees
-  add column if not exists monthly_leave_days numeric default 1.75;
+  add column if not exists monthly_leave_days numeric default 1.5;
 
 alter table public.employees
-  alter column monthly_leave_days set default 1.75;
+  alter column monthly_leave_days set default 1.5;
 
 update public.employees
-set monthly_leave_days = 1.75
+set monthly_leave_days = 1.5
 where monthly_leave_days is null;
 
 create or replace function public.months_worked_since_hire(start_date date)

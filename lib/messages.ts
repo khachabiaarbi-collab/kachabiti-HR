@@ -432,7 +432,7 @@ export const en = {
   "modal.inviteEyebrow": "Team directory",
   "modal.inviteTitle": "Invite employee",
   "modal.inviteNote":
-    "They will set a password from the invite email. Annual solde is months worked times this monthly rate (default 1.75). A future start date stays at 0.",
+    "They will set a password from the invite email. Annual solde is months worked times this monthly rate (default 1.5). A future start date stays at 0.",
   "modal.nameEmailRequired": "Name and work email are required",
   "modal.sendInvite": "Send invite",
   "panel.details": "Employee details",
@@ -1044,7 +1044,7 @@ export const fr: Record<keyof typeof en, string> = {
   "modal.inviteEyebrow": "Annuaire",
   "modal.inviteTitle": "Inviter un employé",
   "modal.inviteNote":
-    "La personne définira un mot de passe depuis l’e-mail d’invitation. Le solde annuel = mois travaillés × ce taux mensuel (1,75 par défaut). Une date future reste à 0.",
+    "La personne définira un mot de passe depuis l’e-mail d’invitation. Le solde annuel = mois travaillés × ce taux mensuel (1,5 par défaut). Une date future reste à 0.",
   "modal.nameEmailRequired": "Le nom et l’e-mail professionnel sont requis",
   "modal.sendInvite": "Envoyer l’invitation",
   "panel.details": "Fiche employé",
