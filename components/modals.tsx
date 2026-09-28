@@ -31,6 +31,7 @@ import {
   formatDurationMinutes,
   initialsFromName,
   isoDate,
+  isAnnualLeaveType,
   isParentalLeaveType,
   isSickLeaveType,
   isUnpaidLeaveType,
@@ -74,7 +75,12 @@ export function RequestModal({
   flash: (message: string) => void;
   onSubmitted: () => void | Promise<void>;
 }) {
-  const [leaveTypeId, setLeaveTypeId] = useState(leaveTypes[0]?.id ?? "");
+  const [leaveTypeId, setLeaveTypeId] = useState(
+    () =>
+      leaveTypes.find((type) => isAnnualLeaveType(type))?.id ??
+      leaveTypes[0]?.id ??
+      "",
+  );
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
