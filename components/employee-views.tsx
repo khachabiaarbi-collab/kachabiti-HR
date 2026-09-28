@@ -56,6 +56,7 @@ import {
   displayLeaveType,
   displayValue,
   firstName,
+  formatDurationMinutes,
   firstParentalLeave,
   formatDisplayDate,
   isAnnualLeaveType,
@@ -65,7 +66,9 @@ import {
   requestedLeaveDays,
 } from "@/lib/map-rows";
 import { uploadEmployeeAvatar } from "@/lib/employee-avatar";
+import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { translateRole, translateStatus, useLanguage, useT } from "@/lib/i18n";
+import { useLeaveHourBalance } from "@/lib/use-leave-hours";
 import { createClient } from "@/lib/supabase/client";
 
 function parentalStatus(
@@ -108,6 +111,7 @@ export function EmployeeView({
   reload: () => Promise<void>;
 }) {
   const { t, dateLocale } = useLanguage();
+  const { balance: leaveHours } = useLeaveHourBalance();
   const [pendingCancel, setPendingCancel] = useState<LeaveRequest | null>(null);
   const [pendingCancelAuthz, setPendingCancelAuthz] =
     useState<Authorization | null>(null);
@@ -226,17 +230,15 @@ export function EmployeeView({
           <RequestTabs value={tab} onChange={setTab} />
           {tab === "authorizations" && (
             <p className="authz-bucket">
-              {t("employee.usedOf8h", { used: authzBalance.usedDurationLabel })}
-              {authzBalance.extraMinutes > 0 ? (
+              {t("employee.authUsed", { used: authzBalance.usedDurationLabel })}
+              {leaveHours &&
+              leaveHours.thisMonth.uncoveredAuthorizationHours > 0 ? (
                 <span className="authz-extra-danger">
-                  {t("employee.overFree", { extra: authzBalance.extraLabel })}
-                  {authzBalance.daysCharged > 0
-                    ? authzBalance.daysCharged === 1
-                      ? t("employee.takesOneShort")
-                      : t("employee.takesDaysShort", {
-                          count: authzBalance.daysCharged,
-                        })
-                    : ""}
+                  {" · "}
+                  {formatDurationMinutes(
+                    leaveHours.thisMonth.uncoveredAuthorizationHours * 60,
+                  )}{" "}
+                  {t("att.authGap")}
                 </span>
               ) : null}
             </p>
@@ -523,7 +525,8 @@ export function EmployeeView({
         );
       return { type, used, cap: type.defaultDays };
     });
-  const annualDays = annual?.daysRemaining ?? 0;
+  const annualDays = leaveHours?.balanceDays ?? annual?.daysRemaining ?? 0;
+  const earnedThisMonth = leaveHours?.thisMonth.earnedDays;
   const soldeWarning = Boolean(annual) && annualDays <= 0;
   const firstParental = firstParentalLeave(
     mine,
@@ -571,20 +574,35 @@ export function EmployeeView({
       <section className="metric-grid">
         <Metric
           label={t("employee.monthlyBalance")}
-          value={String(monthlyDays)}
-          note={t("employee.monthlyNote")}
+          value={
+            earnedThisMonth == null
+              ? String(monthlyDays)
+              : formatLeaveDayCount(earnedThisMonth, dateLocale)
+          }
+          note={
+            leaveHours
+              ? t("employee.earnedCap", { rate: leaveHours.monthlyRate })
+              : t("employee.monthlyNote")
+          }
           tone="rose"
           icon={<CalendarDays size={19} />}
         />
         <Metric
           label={t("employee.vacation")}
-          value={String(annual?.daysRemaining ?? 0)}
+          value={formatLeaveDayCount(annualDays, dateLocale)}
           note={
-            annualDays < 0
-              ? t("employee.vacationNeg")
-              : annualDays === 0
-                ? t("employee.vacationZero")
-                : t("employee.daysRemaining")
+            leaveHours
+              ? t("employee.perHour", {
+                  days: formatLeaveDayCount(
+                    leaveHours.thisMonth.hourValueDays,
+                    dateLocale,
+                  ),
+                })
+              : annualDays < 0
+                ? t("employee.vacationNeg")
+                : annualDays === 0
+                  ? t("employee.vacationZero")
+                  : t("employee.daysRemaining")
           }
           tone="indigo"
           icon={<Palmtree size={19} />}
@@ -598,16 +616,26 @@ export function EmployeeView({
           icon={<ShieldCheck size={19} />}
         />
         <Metric
-          label={t("employee.authBalance")}
-          value={authzBalance.remainingLabel}
-          note={
-            authzBalance.extraMinutes > 0
-              ? t("employee.authOver", { extra: authzBalance.extraLabel })
-              : t("employee.authUsed", { used: authzBalance.usedDurationLabel })
+          label={t("att.authGap")}
+          value={
+            leaveHours
+              ? formatDurationMinutes(
+                  leaveHours.thisMonth.uncoveredAuthorizationHours * 60,
+                )
+              : authzBalance.usedDurationLabel
           }
-          tone={authzBalance.extraMinutes > 0 ? "rose" : "amber"}
+          note={t("employee.authUsed", { used: authzBalance.usedDurationLabel })}
+          tone={
+            leaveHours && leaveHours.thisMonth.uncoveredAuthorizationHours > 0
+              ? "rose"
+              : "amber"
+          }
           icon={<Clock3 size={19} />}
-          valueTone={authzBalance.extraMinutes > 0 ? "negative" : undefined}
+          valueTone={
+            leaveHours && leaveHours.thisMonth.uncoveredAuthorizationHours > 0
+              ? "negative"
+              : undefined
+          }
         />
       </section>
       <div className="card other-leave-card">
@@ -615,30 +643,51 @@ export function EmployeeView({
         <h2>{t("employee.authzTitle")}</h2>
         <div className="request-solde">
           <div>
-            <span>{t("employee.used")}</span>
+            <span>{t("employee.authHours")}</span>
             <b>{authzBalance.usedDurationLabel}</b>
           </div>
-          <div>
-            <span>{t("employee.leftOf8h")}</span>
-            <b>{authzBalance.remainingLabel}</b>
+          <div
+            className={
+              leaveHours && leaveHours.thisMonth.uncoveredAuthorizationHours > 0
+                ? "is-danger"
+                : undefined
+            }
+          >
+            <span>{t("employee.authNotBack")}</span>
+            <b>
+              {leaveHours
+                ? formatDurationMinutes(
+                    leaveHours.thisMonth.uncoveredAuthorizationHours * 60,
+                  )
+                : t("common.dash")}
+            </b>
           </div>
-          <div className={authzBalance.extraMinutes > 0 ? "is-danger" : undefined}>
-            <span>{t("employee.extra")}</span>
-            <b>{authzBalance.extraLabel}</b>
+          <div>
+            <span>{t("employee.authDaysOff")}</span>
+            <b>
+              {leaveHours
+                ? formatLeaveDayCount(
+                    leaveHours.thisMonth.uncoveredAuthorizationHours / 8,
+                    dateLocale,
+                  )
+                : t("common.dash")}
+            </b>
           </div>
         </div>
-        <p>{t("employee.authzPolicy")}</p>
-        {authzBalance.extraMinutes > 0 && (
-          <p className="solde-alert" role="alert">
-            {t("employee.authzExceeded", { extra: authzBalance.extraLabel })}
-            {authzBalance.daysCharged > 0
-              ? authzBalance.daysCharged === 1
-                ? t("employee.takesOneDay")
-                : t("employee.takesDays", { count: authzBalance.daysCharged })
-              : ""}
-            .
-          </p>
-        )}
+        <p>
+          {leaveHours && leaveHours.thisMonth.uncoveredAuthorizationHours > 0
+            ? t("employee.authzExplain", {
+                used: authzBalance.usedDurationLabel,
+                unworked: formatDurationMinutes(
+                  leaveHours.thisMonth.uncoveredAuthorizationHours * 60,
+                ),
+                days: formatLeaveDayCount(
+                  leaveHours.thisMonth.uncoveredAuthorizationHours / 8,
+                  dateLocale,
+                ),
+              })
+            : t("employee.authzExplainNone")}
+        </p>
         <div>
           <Button secondary onClick={() => setModal("authorization")}>
             {t("employee.requestAuthz")}

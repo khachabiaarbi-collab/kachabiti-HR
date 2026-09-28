@@ -11,6 +11,7 @@ import type {
   LeaveType,
 } from "@/lib/app-types";
 import { Avatar, Button, Field, Status } from "@/components/primitives";
+import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
 import {
   getLeaveAttachmentUrl,
@@ -18,9 +19,7 @@ import {
 } from "@/lib/leave-attachments";
 import {
   authorizationBalance,
-  authorizationBucketLabel,
   authorizationMonthKey,
-  authorizationVacationDaysToCharge,
   approvedAuthorizationMinutes,
   DEFAULT_MONTHLY_LEAVE_DAYS,
   displayLeaveType,
@@ -360,7 +359,7 @@ export function AuthorizationModal({
   const [endTime, setEndTime] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const t = useT();
+  const { t, dateLocale } = useLanguage();
   const durationMinutes =
     startTime && endTime ? minutesBetweenTimes(startTime, endTime) : 0;
   const usedMinutes = currentEmployeeId
@@ -371,13 +370,6 @@ export function AuthorizationModal({
       )
     : 0;
   const monthBalance = authorizationBalance(usedMinutes);
-  const extraDaysIfApproved = authorizationVacationDaysToCharge(
-    usedMinutes,
-    Math.max(0, durationMinutes),
-  );
-  const afterBalance = authorizationBalance(
-    usedMinutes + Math.max(0, durationMinutes),
-  );
 
   const submit = async () => {
     if (saving) return;
@@ -450,8 +442,12 @@ export function AuthorizationModal({
             <b>{monthBalance.usedDurationLabel}</b>
           </div>
           <div>
-            <span>{t("employee.leftOf8h")}</span>
-            <b>{monthBalance.remainingLabel}</b>
+            <span>{t("employee.ifNotPunched")}</span>
+            <b>
+              {durationMinutes > 0
+                ? formatLeaveDayCount(durationMinutes / 480, dateLocale)
+                : t("common.dash")}
+            </b>
           </div>
           <div>
             <span>{t("modal.thisRequest")}</span>
@@ -462,19 +458,6 @@ export function AuthorizationModal({
             </b>
           </div>
         </div>
-        {afterBalance.extraMinutes > 0 && (
-          <p className="solde-alert" role="alert">
-            {t("modal.exceeds8h")}
-            {extraDaysIfApproved > 0
-              ? `${
-                  extraDaysIfApproved === 1
-                    ? t("modal.ifApprovedOne")
-                    : t("modal.ifApprovedDays", { count: extraDaysIfApproved })
-                }${t("modal.overBy", { extra: afterBalance.extraLabel })}`
-              : t("modal.byExtra", { extra: afterBalance.extraLabel })}
-            .
-          </p>
-        )}
         <Field
           label={t("modal.whichDay")}
           name="date"
@@ -1420,11 +1403,6 @@ export function AuthorizationDetail({
   const [confirmReject, setConfirmReject] = useState(false);
   const t = useT();
   const { dateLocale } = useLanguage();
-  const vacationDaysIfApproved =
-    request.status === "Pending"
-      ? authorizationVacationDaysToCharge(usedMinutes, request.durationMinutes)
-      : 0;
-
   return (
     <div className="side-panel request-detail">
       <button type="button" className="panel-close" onClick={close}>
@@ -1442,8 +1420,8 @@ export function AuthorizationDetail({
           <b>{request.durationLabel}</b>
         </div>
         <div>
-          <span>{t("employee.thisMonth")}</span>
-          <b>{authorizationBucketLabel(usedMinutes)}</b>
+          <span>{t("employee.used")}</span>
+          <b>{formatDurationMinutes(usedMinutes)}</b>
         </div>
       </div>
       <div className="detail-block">
@@ -1506,20 +1484,11 @@ export function AuthorizationDetail({
       {confirmApprove && onApprove && (
         <ConfirmModal
           title={t("admin.approveTitle")}
-          message={
-            vacationDaysIfApproved > 0
-              ? t("admin.approveAuthzDays", {
-                  name: request.name,
-                  date: formatDisplayDate(request.date, dateLocale),
-                  duration: request.durationLabel,
-                  days: vacationDaysIfApproved,
-                })
-              : t("admin.approveAuthz", {
-                  name: request.name,
-                  date: formatDisplayDate(request.date, dateLocale),
-                  duration: request.durationLabel,
-                })
-          }
+          message={t("admin.approveAuthz", {
+            name: request.name,
+            date: formatDisplayDate(request.date, dateLocale),
+            duration: request.durationLabel,
+          })}
           confirmLabel={t("common.approve")}
           cancelLabel={t("admin.goBack")}
           danger={false}

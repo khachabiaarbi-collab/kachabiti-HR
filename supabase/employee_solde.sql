@@ -1,5 +1,7 @@
 -- Run in the Supabase SQL editor.
 -- Per-employee monthly annual rate (default 1.5 = 18/12).
+-- Stored annual days are no longer the vacation balance. The app earns vacation
+-- from punched hours (monthly rate / that month's scheduled hours, cap = rate).
 -- Annual solde = months worked since hire × rate, capped at rate × 12.
 -- Sick (and other non-annual types) get the full yearly default, not monthly.
 -- Unpaid stays 0. A future start date gets 0 annual days.
