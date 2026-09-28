@@ -3201,6 +3201,32 @@ select {
   min-width: 780px;
   overflow-x: auto;
 }
+.leave-hours-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.6fr) repeat(6, minmax(72px, 1fr)) 40px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid #f0f2f4;
+  color: #475569;
+  font-size: 12px;
+}
+.leave-hours-row.is-head {
+  color: #94a3b8;
+  background: #fafafa;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.leave-hours-row .secondary-button {
+  padding: 6px;
+  border-radius: 8px;
+}
+.attendance-report-filters .secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .attendance-report-row {
   width: 100%;
   display: grid;

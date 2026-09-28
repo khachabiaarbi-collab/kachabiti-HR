@@ -20,6 +20,24 @@ function homeForRole(role: string | null | undefined) {
   return role === "admin" || role === "manager" ? "/admin" : "/dashboard";
 }
 
+function passwordLinkFromHash() {
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : "";
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const type = params.get("type");
+  if (
+    !params.get("access_token") ||
+    !params.get("refresh_token") ||
+    (type !== "invite" && type !== "recovery")
+  ) {
+    return null;
+  }
+  const welcome = type === "invite" ? "?welcome=1" : "";
+  return `/reset-password${welcome}${window.location.hash}`;
+}
+
 async function applyInviteSessionFromUrl() {
   const hash = window.location.hash.startsWith("#")
     ? window.location.hash.slice(1)
@@ -30,14 +48,18 @@ async function applyInviteSessionFromUrl() {
   const refreshToken = params.get("refresh_token");
   if (!accessToken || !refreshToken) return;
   const supabase = createClient();
-  await supabase.auth.setSession({
+  const { error } = await supabase.auth.setSession({
     access_token: accessToken,
     refresh_token: refreshToken,
   });
+  if (error) return error.message;
+  const search = new URLSearchParams(window.location.search);
+  if (params.get("type") === "invite") search.set("welcome", "1");
+  const query = search.toString();
   window.history.replaceState(
     {},
     "",
-    `${window.location.pathname}${window.location.search}`,
+    `${window.location.pathname}${query ? `?${query}` : ""}`,
   );
 }
 
@@ -83,6 +105,11 @@ export function AuthScreen({
   const t = useT();
 
   useEffect(() => {
+    const passwordLink = passwordLinkFromHash();
+    if (passwordLink && path !== "/reset-password") {
+      window.location.replace(passwordLink);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const err = params.get("error");
     if (err === "profile") {
@@ -92,9 +119,11 @@ export function AuthScreen({
       setError(t("auth.signInFailed"));
     }
     if (path === "/reset-password") {
-      void applyInviteSessionFromUrl();
+      void applyInviteSessionFromUrl().then((message) => {
+        if (message) setError(message);
+      });
     }
-  }, [path]);
+  }, [path, t]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();

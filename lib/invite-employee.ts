@@ -92,7 +92,7 @@ export async function inviteEmployee(input: {
     const admin = createAdminClient();
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
       data: { full_name: name },
-      redirectTo: `${origin}/reset-password?welcome=1`,
+      redirectTo: `${origin}/reset-password`,
     });
     if (error) {
       if (/redirect/i.test(error.message)) {

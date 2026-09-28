@@ -21,8 +21,9 @@ UTC `timestamptz` values and displayed in Tunis time.
 
 ## Default configuration
 
-- Work days: Monday through Friday
-- Work segments: 08:00–12:00 and 13:00–17:00
+- Work days: Monday through Friday, plus Saturday morning
+- Weekday segments: 08:00–12:00 and 13:00–17:00
+- Saturday: 08:00–13:00
 - Normal break: 12:00–13:00
 - Grace period: 5 minutes
 - Maximum sessions: 5 per employee per day

@@ -57,9 +57,7 @@ import {
 } from "@/components/attendance-views";
 import {
   approvedAuthorizationMinutes,
-  authorizationBalance,
   authorizationMonthKey,
-  authorizationVacationDaysToCharge,
   displayLeaveType,
   displayValue,
   DEFAULT_MONTHLY_LEAVE_DAYS,
@@ -77,6 +75,10 @@ import {
   monthStartDate,
   requestedLeaveDays,
 } from "@/lib/map-rows";
+import {
+  punchedMinutesByEmployee,
+  uncoveredAuthorizationMinutes,
+} from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
 import { holidaysInMonth, loadTunisiaHolidays } from "@/lib/tunisia-holidays";
 import {
@@ -254,57 +256,39 @@ async function persistAuthorizationDecision(
   let vacationDaysTaken = 0;
 
   if (status === "approved" && request.status !== "approved") {
-    const monthKey = authorizationMonthKey(String(request.date ?? ""));
-    const chargedSelect = await supabase
-      .from("authorizations")
-      .select("duration_minutes, leave_days_charged, date")
+    const workDate = String(request.date ?? "").slice(0, 10);
+    const punchSelect = await supabase
+      .from("attendance_punches")
+      .select("employee_id, work_date, type, occurred_at, sequence_no")
       .eq("employee_id", request.employee_id)
-      .eq("status", "approved");
-    const tracked = !chargedSelect.error;
-    let approvedRows: Array<{
-      duration_minutes: number | string;
-      leave_days_charged?: number | string | null;
-      date?: string | null;
-    }> = chargedSelect.data ?? [];
-    if (!tracked) {
-      if (!/leave_days_charged/i.test(chargedSelect.error.message)) {
-        return { error: chargedSelect.error.message, vacationDaysTaken: 0 };
-      }
-      const fallback = await supabase
-        .from("authorizations")
-        .select("duration_minutes, date")
-        .eq("employee_id", request.employee_id)
-        .eq("status", "approved");
-      if (fallback.error) {
-        return { error: fallback.error.message, vacationDaysTaken: 0 };
-      }
-      approvedRows = fallback.data ?? [];
+      .eq("work_date", workDate)
+      .is("voided_at", null);
+    if (punchSelect.error) {
+      vacationDaysTaken = 0;
+    } else {
+    const punched = punchedMinutesByEmployee(
+      (punchSelect.data ?? [])
+        .filter((row) => row.type === "entry" || row.type === "exit")
+        .map((row) => ({
+          employeeId: String(row.employee_id),
+          workDate: String(row.work_date).slice(0, 10),
+          type: row.type as "entry" | "exit",
+          occurredAt: String(row.occurred_at),
+          sequenceNo: Number(row.sequence_no) || 0,
+        })),
+      new Date(),
+    );
+    const uncovered = uncoveredAuthorizationMinutes(
+      [
+        {
+          date: workDate,
+          durationMinutes: Number(request.duration_minutes) || 0,
+        },
+      ],
+      punched.get(String(request.employee_id)) ?? new Map(),
+    );
+    vacationDaysTaken = uncovered / (8 * 60);
     }
-    approvedRows = approvedRows.filter(
-      (row) => authorizationMonthKey(String(row.date ?? "")) === monthKey,
-    );
-
-    const usedBefore = approvedRows.reduce(
-      (sum, row) => sum + (Number(row.duration_minutes) || 0),
-      0,
-    );
-    const additional = Number(request.duration_minutes) || 0;
-    const expected = authorizationBalance(usedBefore + additional).daysCharged;
-    const alreadyCharged = tracked
-      ? approvedRows.reduce(
-          (sum, row) =>
-            sum + (Number(row.leave_days_charged) || 0),
-          0,
-        )
-      : authorizationBalance(usedBefore).daysCharged;
-    vacationDaysTaken = Math.max(0, expected - alreadyCharged);
-
-    const chargeError = await deductAnnualLeaveDays(
-      supabase,
-      request.employee_id,
-      vacationDaysTaken,
-    );
-    if (chargeError) return { error: chargeError, vacationDaysTaken: 0 };
   }
 
   const payload: {
@@ -1089,16 +1073,6 @@ function Requests({
   const selected = requests.find((request) => request.id === selectedId) ?? null;
   const selectedAuthz =
     authorizations.find((request) => request.id === selectedId) ?? null;
-  const pendingAuthzVacationDays = pendingApproveAuthz
-    ? authorizationVacationDaysToCharge(
-        approvedAuthorizationMinutes(
-          authorizations,
-          pendingApproveAuthz.employeeId,
-          authorizationMonthKey(pendingApproveAuthz.date),
-        ),
-        pendingApproveAuthz.durationMinutes,
-      )
-    : 0;
   const selectedEmployee = (tab === "leaves" ? selected : selectedAuthz)
     ? (employees.find(
         (employee) =>
@@ -1485,20 +1459,11 @@ function Requests({
       {pendingApproveAuthz && (
         <ConfirmModal
           title={t("admin.approveTitle")}
-          message={
-            pendingAuthzVacationDays > 0
-              ? t("admin.approveAuthzDays", {
-                  name: pendingApproveAuthz.name,
-                  date: formatDisplayDate(pendingApproveAuthz.date, dateLocale),
-                  duration: pendingApproveAuthz.durationLabel,
-                  days: pendingAuthzVacationDays,
-                })
-              : t("admin.approveAuthz", {
-                  name: pendingApproveAuthz.name,
-                  date: formatDisplayDate(pendingApproveAuthz.date, dateLocale),
-                  duration: pendingApproveAuthz.durationLabel,
-                })
-          }
+          message={t("admin.approveAuthz", {
+            name: pendingApproveAuthz.name,
+            date: formatDisplayDate(pendingApproveAuthz.date, dateLocale),
+            duration: pendingApproveAuthz.durationLabel,
+          })}
           confirmLabel={t("common.approve")}
           cancelLabel={t("admin.goBack")}
           danger={false}

@@ -28,6 +28,11 @@ import {
 
 import { Header, Metric } from "@/components/primitives";
 import {
+  formatLeaveDayCount,
+  type LeaveHourTeamItem,
+} from "@/lib/leave-hours";
+import { useLeaveHourBalance } from "@/lib/use-leave-hours";
+import {
   ATTENDANCE_TIMEZONE,
   formatAttendanceDuration,
   type AttendanceApiError,
@@ -158,6 +163,44 @@ const WEEKDAY_KEYS = [
   "att.sunday",
 ] as const;
 
+function rendementPercent(scheduledHours: number, punchedHours: number) {
+  if (scheduledHours <= 0) return 0;
+  return Math.round((punchedHours / scheduledHours) * 1000) / 10;
+}
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  if (/[;"\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
+}
+
+function hoursFileName(month: string, employeeName?: string) {
+  const slug = (employeeName ?? "all")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `hours-${month}-${slug || "employee"}.csv`;
+}
+
+function downloadHoursFile(
+  filename: string,
+  header: string[],
+  rows: Array<Array<string | number>>,
+) {
+  const body = [header, ...rows]
+    .map((row) => row.map(csvCell).join(";"))
+    .join("\r\n");
+  const blob = new Blob([`\uFEFF${body}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function localIsoDate(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: ATTENDANCE_TIMEZONE,
@@ -182,6 +225,7 @@ export function EmployeeTimeClock({
   flash: (message: string) => void;
 }) {
   const { t, dateLocale } = useLanguage();
+  const { balance: leaveHours, reload: reloadLeaveHours } = useLeaveHourBalance();
   const [attendance, setAttendance] = useState<TodayAttendance | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -257,6 +301,7 @@ export function EmployeeTimeClock({
         return;
       }
       pendingIdempotencyKey.current = null;
+      void reloadLeaveHours();
       syncAttendance({
         ...(payload as TodayAttendance),
         previousIncomplete: attendance.previousIncomplete,
@@ -383,6 +428,20 @@ export function EmployeeTimeClock({
       </section>
 
       <section className="metric-grid attendance-metrics">
+        {leaveHours && (
+          <Metric
+            label={t("att.vacationSoFar")}
+            value={formatLeaveDayCount(leaveHours.balanceDays, dateLocale)}
+            note={t("att.vacationHour", {
+              days: formatLeaveDayCount(
+                leaveHours.thisMonth.hourValueDays,
+                dateLocale,
+              ),
+            })}
+            tone="indigo"
+            icon={<Clock3 size={19} />}
+          />
+        )}
         <Metric
           label={t("att.totalWorked")}
           value={formatAttendanceDuration(attendance.workedMinutes)}
@@ -583,8 +642,11 @@ export function AdminAttendance({
   focusCorrectionId?: string | null;
   onNoticeFocusHandled?: () => void;
 }) {
-  const t = useT();
+  const { t, dateLocale } = useLanguage();
   const today = localIsoDate();
+  const [hourRows, setHourRows] = useState<LeaveHourTeamItem[]>([]);
+  const [hoursMonth, setHoursMonth] = useState(today.slice(0, 7));
+  const [hoursPage, setHoursPage] = useState(1);
   const [tab, setTab] = useState<"records" | "corrections">("records");
   const [from, setFrom] = useState(shiftIsoDate(today, -29));
   const [to, setTo] = useState(today);
@@ -688,7 +750,36 @@ export function AdminAttendance({
     onNoticeFocusHandled?.();
   }, [corrections, focusCorrectionId, onNoticeFocusHandled]);
 
+  useEffect(() => {
+    if (tab !== "records" || !/^\d{4}-\d{2}$/.test(hoursMonth)) return;
+    const month = hoursMonth;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/attendance/leave-hours?month=${month}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as { items?: LeaveHourTeamItem[] };
+        if (!cancelled) setHourRows(payload.items ?? []);
+      } catch {
+        if (!cancelled) setHourRows([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hoursMonth, tab]);
+
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const hoursPageSize = 20;
+  const hoursPageCount = Math.max(1, Math.ceil(hourRows.length / hoursPageSize));
+  const currentHoursPage = Math.min(hoursPage, hoursPageCount);
+  const visibleHourRows = hourRows.slice(
+    (currentHoursPage - 1) * hoursPageSize,
+    currentHoursPage * hoursPageSize,
+  );
   const totalWorked = items.reduce((sum, item) => sum + item.workedMinutes, 0);
   const incomplete = items.filter((item) => item.state === "incomplete").length;
   const present = items.filter((item) => item.state === "present").length;
@@ -777,6 +868,156 @@ export function AdminAttendance({
               tone="rose"
               icon={<AlertTriangle size={19} />}
             />
+          </section>
+
+          <section className="card attendance-report-card">
+            <div className="attendance-report-filters">
+              <span className="filter-title">
+                <Timer size={15} /> {t("att.monthHours")}
+              </span>
+              <label>
+                {t("att.month")}
+                <input
+                  type="month"
+                  value={hoursMonth}
+                  onChange={(event) => {
+                    setHoursMonth(event.target.value);
+                    setHoursPage(1);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ marginLeft: "auto" }}
+                disabled={hourRows.length === 0}
+                onClick={() => {
+                  const month = hoursMonth;
+                  downloadHoursFile(
+                    hoursFileName(month),
+                    [
+                      t("admin.colEmployee"),
+                      t("att.month"),
+                      t("att.scheduled"),
+                      t("att.punched"),
+                      t("att.rendement"),
+                      t("att.extra"),
+                      t("att.earned"),
+                    ],
+                    hourRows.map((row) => [
+                      row.employeeName,
+                      month,
+                      row.scheduledHours,
+                      row.punchedHours,
+                      `${rendementPercent(row.scheduledHours, row.punchedHours)}%`,
+                      row.extraHours,
+                      row.earnedDays,
+                    ]),
+                  );
+                }}
+              >
+                <ArrowDownToLine size={15} /> {t("att.exportAll")}
+              </button>
+            </div>
+            <div className="attendance-report-table">
+              <div className="leave-hours-row is-head">
+                <span>{t("admin.colEmployee")}</span>
+                <span>{t("att.scheduled")}</span>
+                <span>{t("att.punched")}</span>
+                <span>{t("att.rendement")}</span>
+                <span>{t("att.extra")}</span>
+                <span>{t("att.authGap")}</span>
+                <span>{t("att.earned")}</span>
+                <span />
+              </div>
+              {hourRows.length === 0 ? (
+                <div className="attendance-report-empty">{t("att.noRecords")}</div>
+              ) : (
+                visibleHourRows.map((row) => (
+                  <div className="leave-hours-row" key={row.employeeId}>
+                    <span>
+                      <b>{row.employeeName}</b>
+                    </span>
+                    <span>{row.scheduledHours}h</span>
+                    <span>{row.punchedHours}h</span>
+                    <span>
+                      {rendementPercent(row.scheduledHours, row.punchedHours)}%
+                    </span>
+                    <span>{row.extraHours}h</span>
+                    <span>{row.uncoveredAuthorizationHours}h</span>
+                    <span>{formatLeaveDayCount(row.earnedDays, dateLocale)}</span>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      aria-label={t("att.exportOne", { name: row.employeeName })}
+                      onClick={() => {
+                        const month = hoursMonth;
+                        downloadHoursFile(
+                          hoursFileName(month, row.employeeName),
+                          [
+                            t("admin.colEmployee"),
+                            t("att.month"),
+                            t("att.scheduled"),
+                            t("att.punched"),
+                            t("att.rendement"),
+                            t("att.extra"),
+                            t("att.earned"),
+                          ],
+                          [
+                            [
+                              row.employeeName,
+                              month,
+                              row.scheduledHours,
+                              row.punchedHours,
+                              `${rendementPercent(row.scheduledHours, row.punchedHours)}%`,
+                              row.extraHours,
+                              row.earnedDays,
+                            ],
+                          ],
+                        );
+                      }}
+                    >
+                      <ArrowDownToLine size={14} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            {hourRows.length > 0 && (
+              <div className="attendance-report-pagination">
+                <span>
+                  {t("att.pageSummary", {
+                    page: currentHoursPage,
+                    pageCount: hoursPageCount,
+                    total: hourRows.length,
+                  })}
+                </span>
+                <div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={currentHoursPage <= 1}
+                    onClick={() =>
+                      setHoursPage((current) => Math.max(1, current - 1))
+                    }
+                  >
+                    {t("common.previous")}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={currentHoursPage >= hoursPageCount}
+                    onClick={() =>
+                      setHoursPage((current) =>
+                        Math.min(hoursPageCount, current + 1),
+                      )
+                    }
+                  >
+                    {t("common.next")}
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="card attendance-report-card">

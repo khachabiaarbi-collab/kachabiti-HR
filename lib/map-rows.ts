@@ -453,7 +453,7 @@ export function soldeGoesNegative(
   return remaining - requestedDays < 0;
 }
 
-export const DEFAULT_MONTHLY_LEAVE_DAYS = 1.75;
+export const DEFAULT_MONTHLY_LEAVE_DAYS = 1.5;
 
 function leaveTypeCode(type: { code?: string | null }) {
   return (type.code ?? "").trim().toUpperCase();
@@ -530,19 +530,15 @@ export function entitlementDays(
 
 export function openingDaysForLeaveType(
   type: Pick<LeaveType, "name" | "defaultDays"> & { code?: string | null },
-  startDate: string | null | undefined,
-  monthlyLeaveDays?: number | null,
-  asOf = new Date(),
+  _startDate?: string | null,
+  _monthlyLeaveDays?: number | null,
+  _asOf = new Date(),
 ) {
   if (isUnpaidLeaveType(type)) return 0;
   if (isParentalLeaveType(type)) return 0;
   if (isAnnualLeaveType(type)) {
-    return entitlementDays(
-      type.defaultDays,
-      startDate,
-      monthlyLeaveDays,
-      asOf,
-    );
+    // Vacation is earned from punched hours, not granted on the hire date.
+    return 0;
   }
   return type.defaultDays;
 }
