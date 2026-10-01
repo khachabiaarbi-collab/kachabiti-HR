@@ -435,6 +435,57 @@ after insert or update or delete on public.employee_pay_components
 for each row execute function public.payroll_audit();
 
 -- ---------------------------------------------------------------------------
+-- Employer details printed on every payslip (single row)
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.payroll_company (
+  id integer primary key default 1 check (id = 1),
+  name text not null default 'Kachabiti',
+  address text,
+  tax_id text,
+  cnss_employer_number text,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.payroll_company (id) values (1) on conflict (id) do nothing;
+
+drop trigger if exists payroll_company_touch on public.payroll_company;
+create trigger payroll_company_touch
+before update on public.payroll_company
+for each row execute function public.payroll_touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- "Your payslip is available" notice when a month is validated. Needs
+-- supabase/notifications.sql; skipped quietly if that table is missing.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.payroll_notify_validated()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status = 'validated' and old.status = 'draft'
+    and to_regclass('public.notifications') is not null
+  then
+    insert into public.notifications (user_id, type, message)
+    select payslip.employee_id,
+      'reminder',
+      'Your payslip for ' || to_char(new.period, 'YYYY-MM') || ' is available.'
+    from public.payslips payslip
+    where payslip.run_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payroll_runs_notify on public.payroll_runs;
+create trigger payroll_runs_notify
+after update of status on public.payroll_runs
+for each row execute function public.payroll_notify_validated();
+
+-- ---------------------------------------------------------------------------
 -- Row level security
 -- ---------------------------------------------------------------------------
 
@@ -446,6 +497,7 @@ alter table public.payroll_runs enable row level security;
 alter table public.payslips enable row level security;
 alter table public.payslip_lines enable row level security;
 alter table public.payroll_audit_log enable row level security;
+alter table public.payroll_company enable row level security;
 
 grant select, insert, update, delete on table
   public.employee_contracts,
@@ -457,6 +509,7 @@ grant select, insert, update, delete on table
   public.payslip_lines
 to authenticated;
 grant select on table public.payroll_audit_log to authenticated;
+grant select, update on table public.payroll_company to authenticated;
 revoke insert, update, delete on public.payroll_audit_log from authenticated;
 
 drop policy if exists "employee_contracts_admin" on public.employee_contracts;
@@ -516,6 +569,15 @@ for select to authenticated using (
   )
 );
 
+-- Everyone with a payslip needs the employer details printed on it.
+drop policy if exists "payroll_company_read" on public.payroll_company;
+create policy "payroll_company_read" on public.payroll_company
+for select to authenticated using (true);
+drop policy if exists "payroll_company_admin_write" on public.payroll_company;
+create policy "payroll_company_admin_write" on public.payroll_company
+for update to authenticated using (public.payroll_is_admin())
+with check (public.payroll_is_admin());
+
 drop policy if exists "payroll_audit_admin_read" on public.payroll_audit_log;
 create policy "payroll_audit_admin_read" on public.payroll_audit_log
 for select to authenticated using (public.payroll_is_admin());
@@ -525,3 +587,4 @@ grant execute on function public.payroll_is_admin(uuid) to authenticated;
 revoke all on function public.payroll_run_published(uuid) from public;
 grant execute on function public.payroll_run_published(uuid) to authenticated;
 revoke all on function public.payroll_audit() from public;
+revoke all on function public.payroll_notify_validated() from public;

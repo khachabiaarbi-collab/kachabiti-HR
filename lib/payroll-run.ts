@@ -728,3 +728,45 @@ async function workedHoursInMonth(employeeId: string, from: string, to: string) 
   const items = ((data as { items?: { workedMinutes?: number }[] } | null)?.items ?? []);
   return round3(items.reduce((sum, item) => sum + (Number(item.workedMinutes) || 0), 0) / 60);
 }
+
+// ---------------------------------------------------------------------------
+// Employer details printed on payslips
+// ---------------------------------------------------------------------------
+
+export type PayrollCompany = {
+  name: string;
+  address: string | null;
+  taxId: string | null;
+  cnssEmployerNumber: string | null;
+};
+
+export async function loadCompany(): Promise<PayrollCompany> {
+  const { data, error } = await createClient()
+    .from("payroll_company")
+    .select("name, address, tax_id, cnss_employer_number")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = data as
+    | { name: string; address: string | null; tax_id: string | null; cnss_employer_number: string | null }
+    | null;
+  return {
+    name: row?.name ?? "Kachabiti",
+    address: row?.address ?? null,
+    taxId: row?.tax_id ?? null,
+    cnssEmployerNumber: row?.cnss_employer_number ?? null,
+  };
+}
+
+export async function saveCompany(company: PayrollCompany) {
+  const { error } = await createClient()
+    .from("payroll_company")
+    .update({
+      name: company.name.trim() || "Kachabiti",
+      address: company.address?.trim() || null,
+      tax_id: company.taxId?.trim() || null,
+      cnss_employer_number: company.cnssEmployerNumber?.trim() || null,
+    })
+    .eq("id", 1);
+  if (error) throw new Error(error.message);
+}

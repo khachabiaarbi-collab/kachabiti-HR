@@ -443,6 +443,14 @@ export default function Page() {
   const role: Role = toUiRole(currentEmployee?.role, isEmployee ? "Employee" : "Admin");
 
   const openNotice = async (item: Notice) => {
+    if (/^Your payslip for /.test(item.text)) {
+      setShowNotices(false);
+      setActive("My profile");
+      window.setTimeout(() => {
+        document.getElementById("payslips")?.scrollIntoView({ behavior: "smooth" });
+      }, 300);
+      return;
+    }
     const attendance =
       Boolean(item.attendanceCorrectionId) ||
       /attendance correction/i.test(item.text);

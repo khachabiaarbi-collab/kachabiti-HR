@@ -8,6 +8,7 @@ import {
   ChevronRight,
   FileText,
   Plus,
+  Printer,
   RefreshCw,
   Settings2,
   Trash2,
@@ -36,14 +37,22 @@ import {
   type MaritalStatus,
   type PayBasis,
 } from "@/lib/payroll";
-import { round3, type IrppBracket, type PayItem, type PayVariables } from "@/lib/payroll-calc";
+import {
+  amountInFrenchWords,
+  round3,
+  type IrppBracket,
+  type PayItem,
+  type PayVariables,
+} from "@/lib/payroll-calc";
 import {
   addEmployeeComponent,
   deleteDraftRun,
   effectiveVariables,
   endEmployeeComponent,
+  loadCompany,
   loadComponents,
   loadEmployeeComponents,
+  loadMyPayslips,
   loadPayslips,
   loadRun,
   loadSettings,
@@ -51,6 +60,7 @@ import {
   monthRange,
   prepareRun,
   ratesOnly,
+  saveCompany,
   saveComponent,
   saveSettings,
   setRunStatus,
@@ -59,6 +69,7 @@ import {
   updatePayslip,
   type EmployeePayComponent,
   type PayComponent,
+  type PayrollCompany,
   type Payslip,
   type PayslipWarning,
   type PayrollRun,
@@ -1053,6 +1064,7 @@ function PayslipPanel({
   const [componentId, setComponentId] = useState("");
   const [amountValue, setAmountValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showDocument, setShowDocument] = useState(false);
 
   useEffect(() => {
     if (!editable) return;
@@ -1118,6 +1130,10 @@ function PayslipPanel({
       )}
 
       <PayslipLines payslip={payslip} />
+      <button type="button" className="secondary-button payslip-view-button" onClick={() => setShowDocument(true)}>
+        <Printer size={15} /> {t("payslip.view")}
+      </button>
+      {showDocument && <PayslipDocument payslip={payslip} onClose={() => setShowDocument(false)} />}
 
       {editable && (
         <div className="detail-block">
@@ -1267,6 +1283,7 @@ function RatesPanel({
   const [verified, setVerified] = useState(initial?.verified ?? false);
   const [saving, setSaving] = useState(false);
   const [components, setComponents] = useState<PayComponent[]>([]);
+  const [company, setCompany] = useState<PayrollCompany | null>(null);
   const [draft, setDraft] = useState({ name: "", kind: "earning" as PayComponent["kind"], subjectToCnss: true, taxable: true });
 
   const reloadComponents = useCallback(async () => {
@@ -1275,7 +1292,20 @@ function RatesPanel({
 
   useEffect(() => {
     reloadComponents().catch((error: Error) => flash(error.message));
+    loadCompany()
+      .then(setCompany)
+      .catch((error: Error) => flash(error.message));
   }, [reloadComponents, flash]);
+
+  const saveCompanyDetails = async () => {
+    if (!company) return;
+    try {
+      await saveCompany(company);
+      flash(t("payslip.companySaved"));
+    } catch (error) {
+      flash((error as Error).message);
+    }
+  };
 
   const save = async () => {
     if (saving) return;
@@ -1475,6 +1505,36 @@ function RatesPanel({
         <Button onClick={() => void save()}>{saving ? t("modal.saving") : t("payroll.saveRates")}</Button>
       </div>
 
+      {company && (
+        <div className="detail-block">
+          <p className="eyebrow">{t("payslip.companyTitle")}</p>
+          <span className="contract-hint">{t("payslip.companyNote")}</span>
+          <Field
+            label={t("payslip.companyName")}
+            value={company.name}
+            onChange={(value) => setCompany({ ...company, name: value })}
+          />
+          <Field
+            label={t("payslip.companyAddress")}
+            value={company.address ?? ""}
+            onChange={(value) => setCompany({ ...company, address: value })}
+          />
+          <Field
+            label={t("payslip.taxId")}
+            value={company.taxId ?? ""}
+            onChange={(value) => setCompany({ ...company, taxId: value })}
+          />
+          <Field
+            label={t("payslip.cnssEmployer")}
+            value={company.cnssEmployerNumber ?? ""}
+            onChange={(value) => setCompany({ ...company, cnssEmployerNumber: value })}
+          />
+          <button type="button" className="secondary-button" onClick={() => void saveCompanyDetails()}>
+            {t("payslip.saveCompany")}
+          </button>
+        </div>
+      )}
+
       <div className="detail-block">
         <p className="eyebrow">{t("payroll.catalogTitle")}</p>
         <div className="pay-item-list">
@@ -1538,5 +1598,269 @@ function RatesPanel({
         </button>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Printable payslip (always in French: it is an official document)
+// ---------------------------------------------------------------------------
+
+const FR_CONTRACT: Record<string, string> = {
+  cdi: "CDI",
+  cdd: "CDD",
+  sivp: "SIVP",
+  karama: "Karama",
+  internship: "Stage",
+  other: "Autre",
+};
+const FR_MARITAL: Record<string, string> = {
+  single: "Célibataire",
+  married: "Marié(e)",
+  divorced: "Divorcé(e)",
+  widowed: "Veuf / veuve",
+};
+
+function frAmount(value: number) {
+  return new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    .format(value)
+    .replace(/\u202f/g, "\u00a0");
+}
+
+function frDate(iso: string | null | undefined) {
+  if (!iso) return "—";
+  const [year, month, day] = iso.slice(0, 10).split("-");
+  return `${day}/${month}/${year}`;
+}
+
+export function PayslipDocument({ payslip, onClose }: { payslip: Payslip; onClose: () => void }) {
+  const { t } = useLanguage();
+  const [company, setCompany] = useState<PayrollCompany | null>(null);
+  const { inputs } = payslip;
+  const { from, to } = monthRange(payslip.period);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    loadCompany()
+      .then(setCompany)
+      .catch(() => setCompany({ name: "Kachabiti", address: null, taxId: null, cnssEmployerNumber: null }));
+    document.body.classList.add("has-payslip-doc");
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("has-payslip-doc");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const earnings = payslip.lines.filter((line) => line.kind === "earning");
+  const withheld = payslip.lines.filter((line) => line.kind === "contribution" || line.kind === "deduction");
+  const employer = payslip.lines.filter((line) => line.kind === "employer");
+  const totalGains = round3(earnings.filter((line) => line.amount > 0).reduce((sum, line) => sum + line.amount, 0));
+  const totalWithheld = round3(
+    earnings.filter((line) => line.amount < 0).reduce((sum, line) => sum - line.amount, 0) +
+      withheld.reduce((sum, line) => sum + line.amount, 0),
+  );
+  const rate = (value: number | null) =>
+    value == null ? "" : `${(value * 100).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} %`;
+  const base = (value: number | null) => (value == null ? "" : frAmount(value));
+  const family = [
+    FR_MARITAL[inputs.contract.maritalStatus] ?? "",
+    inputs.contract.dependentChildren
+      ? `${inputs.contract.dependentChildren} enfant${inputs.contract.dependentChildren > 1 ? "s" : ""}`
+      : "",
+    inputs.contract.headOfFamily ? "chef de famille" : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <div className="payslip-overlay" role="dialog" aria-modal="true" aria-label={t("payslip.view")}>
+      <div className="payslip-toolbar">
+        <span>{t("payslip.printHint")}</span>
+        <div>
+          <button type="button" className="primary-button" onClick={() => window.print()}>
+            <Printer size={15} /> {t("payslip.print")}
+          </button>
+          <button type="button" className="secondary-button" onClick={onClose}>
+            <X size={15} /> {t("payslip.close")}
+          </button>
+        </div>
+      </div>
+
+      <article className="payslip-doc">
+        <header className="payslip-doc-head">
+          <div>
+            <h2>{company?.name ?? "Kachabiti"}</h2>
+            {company?.address && <p>{company.address}</p>}
+            {company?.taxId && <p>Matricule fiscal : {company.taxId}</p>}
+            {company?.cnssEmployerNumber && <p>N° affiliation CNSS : {company.cnssEmployerNumber}</p>}
+          </div>
+          <div className="payslip-doc-title">
+            <h1>Bulletin de paie</h1>
+            <p>
+              Période du {frDate(from)} au {frDate(to)}
+            </p>
+            <p>Paiement par virement</p>
+          </div>
+        </header>
+
+        <section className="payslip-doc-info">
+          <dl>
+            <div><dt>Nom et prénom</dt><dd>{inputs.employee.name}</dd></div>
+            <div><dt>Emploi</dt><dd>{inputs.employee.jobTitle ?? "—"}</dd></div>
+            <div><dt>Service</dt><dd>{inputs.employee.department}</dd></div>
+            <div><dt>Date d’embauche</dt><dd>{frDate(inputs.employee.startDate)}</dd></div>
+          </dl>
+          <dl>
+            <div><dt>Contrat</dt><dd>{FR_CONTRACT[inputs.contract.contractType] ?? "—"}</dd></div>
+            <div><dt>N° CNSS</dt><dd>{inputs.contract.cnssNumber ?? "—"}</dd></div>
+            <div><dt>Situation familiale</dt><dd>{family || "—"}</dd></div>
+            <div>
+              <dt>Banque / RIB</dt>
+              <dd>{[inputs.contract.bankName, inputs.contract.rib].filter(Boolean).join(" · ") || "—"}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <table className="payslip-doc-table">
+          <thead>
+            <tr>
+              <th>Rubrique</th>
+              <th>Base</th>
+              <th>Taux</th>
+              <th>Gains</th>
+              <th>Retenues</th>
+            </tr>
+          </thead>
+          <tbody>
+            {earnings.map((line, index) => (
+              <tr key={`e-${index}`}>
+                <td>{line.label}</td>
+                <td>{line.base == null ? "" : line.base.toLocaleString("fr-FR")}</td>
+                <td>{line.code === "overtime" ? rate(line.rate) : line.rate == null ? "" : frAmount(line.rate)}</td>
+                <td>{line.amount >= 0 ? frAmount(line.amount) : ""}</td>
+                <td>{line.amount < 0 ? frAmount(-line.amount) : ""}</td>
+              </tr>
+            ))}
+            <tr className="is-subtotal">
+              <td>Salaire brut</td>
+              <td />
+              <td />
+              <td colSpan={2}>{frAmount(payslip.gross)}</td>
+            </tr>
+            {withheld.map((line, index) => (
+              <tr key={`w-${index}`}>
+                <td>{line.label}</td>
+                <td>{base(line.base)}</td>
+                <td>{rate(line.rate)}</td>
+                <td />
+                <td>{frAmount(line.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={3}>Totaux</td>
+              <td>{frAmount(totalGains)}</td>
+              <td>{frAmount(totalWithheld)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <section className="payslip-doc-net">
+          <div>
+            <span>Net à payer</span>
+            <strong>{frAmount(payslip.net)} TND</strong>
+          </div>
+          <p>
+            Arrêté le présent bulletin à la somme de : <b>{amountInFrenchWords(payslip.net)}</b>
+          </p>
+        </section>
+
+        <section className="payslip-doc-foot">
+          <dl>
+            <div><dt>Salaire imposable du mois</dt><dd>{frAmount(payslip.taxableIncome)}</dd></div>
+            {employer.map((line, index) => (
+              <div key={`p-${index}`}>
+                <dt>
+                  {line.label} ({rate(line.rate)})
+                </dt>
+                <dd>{frAmount(line.amount)}</dd>
+              </div>
+            ))}
+            <div><dt>Coût total employeur</dt><dd>{frAmount(payslip.employerCost)}</dd></div>
+          </dl>
+          <p>Conservez ce bulletin sans limitation de durée.</p>
+        </section>
+      </article>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Employee: My payslips (validated months only; RLS filters)
+// ---------------------------------------------------------------------------
+
+export function MyPayslips({
+  employeeId,
+  flash: rawFlash,
+}: {
+  employeeId: string | null | undefined;
+  flash: (message: string) => void;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  const [payslips, setPayslips] = useState<Payslip[] | null>(null);
+  const [open, setOpen] = useState<Payslip | null>(null);
+
+  useEffect(() => {
+    if (!employeeId) return;
+    let cancelled = false;
+    loadMyPayslips(employeeId)
+      .then((rows) => {
+        if (!cancelled) setPayslips(rows);
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        // Payroll not set up yet: show the empty state, not an error.
+        if (!isMissingPayrollTable(error.message)) flash(error.message);
+        setPayslips([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId, flash]);
+
+  return (
+    <section className="card profile-section profile-section-wide my-payslips" id="payslips">
+      <h2>{t("payslip.myTitle")}</h2>
+      <p>{t("payslip.myNote")}</p>
+      {payslips === null ? (
+        <p className="contract-hint">{t("contract.loading")}</p>
+      ) : payslips.length === 0 ? (
+        <p className="contract-hint">{t("payslip.myEmpty")}</p>
+      ) : (
+        <div className="pay-item-list my-payslips-list">
+          {payslips.map((payslip) => (
+            <div className="pay-item" key={payslip.id}>
+              <div>
+                <b className="is-month">{monthLabel(payslip.period, dateLocale)}</b>
+                <span>
+                  {t("payroll.gross")} {formatTnd(payslip.gross, dateLocale)}
+                </span>
+              </div>
+              <strong>{formatTnd(payslip.net, dateLocale)}</strong>
+              <button type="button" className="secondary-button" onClick={() => setOpen(payslip)}>
+                <FileText size={14} /> {t("payslip.open")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {open && <PayslipDocument payslip={open} onClose={() => setOpen(null)} />}
+    </section>
   );
 }

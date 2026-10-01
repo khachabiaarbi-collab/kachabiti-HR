@@ -186,6 +186,10 @@ export function translateNotice(
         ? t("status.rejected").toLowerCase()
         : t("status.pending").toLowerCase();
 
+  const payslip = text.match(/^Your payslip for (\d{4})-(\d{2}) is available\.$/);
+  if (payslip) {
+    return t("notice.payslipAvailable", { month: `${payslip[2]}/${payslip[1]}` });
+  }
   const leaveSelf = text.match(
     /^Your leave request \((.+)\) was submitted for approval\.$/,
   );

@@ -44,6 +44,7 @@ import {
   paginate,
   pageForId,
 } from "@/components/primitives";
+import { MyPayslips } from "@/components/payroll-views";
 import {
   deleteAuthorizationRecord,
   deleteLeaveRequestRecord,
@@ -1028,6 +1029,7 @@ function Profile({
           {saving ? t("profile.saving") : t("profile.save")}
         </Button>
       </div>
+      <MyPayslips employeeId={employee?.id} flash={flash} />
     </div>
   );
 }

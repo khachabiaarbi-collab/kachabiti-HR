@@ -4379,3 +4379,215 @@ button.payroll-row:hover {
     width: 100%;
   }
 }
+
+/* Printable payslip */
+.payslip-view-button {
+  width: 100%;
+  margin-top: 14px;
+}
+.payslip-overlay {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  overflow-y: auto;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(32px + env(safe-area-inset-bottom, 0px));
+  background: #e5e7eb;
+}
+.payslip-toolbar {
+  max-width: 820px;
+  margin: 0 auto 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #4b5563;
+  font-size: 12px;
+}
+.payslip-toolbar > div {
+  display: flex;
+  gap: 8px;
+}
+.payslip-doc {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 40px 44px;
+  background: #fff;
+  color: #111827;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 10px 30px #0f172a1f;
+}
+.payslip-doc-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #1f3a8a;
+}
+.payslip-doc-head h2 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.payslip-doc-head p {
+  color: #4b5563;
+}
+.payslip-doc-title {
+  text-align: right;
+}
+.payslip-doc-title h1 {
+  color: #1f3a8a;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.payslip-doc-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 28px;
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.payslip-doc dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+.payslip-doc dt {
+  color: #6b7280;
+}
+.payslip-doc dd {
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.payslip-doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.payslip-doc-table th {
+  padding: 8px;
+  border-bottom: 1px solid #111827;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  text-transform: uppercase;
+}
+.payslip-doc-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f0ee;
+  text-align: right;
+  white-space: nowrap;
+}
+.payslip-doc-table th:first-child,
+.payslip-doc-table td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+.payslip-doc-table .is-subtotal td {
+  background: #f8fafc;
+  font-weight: 700;
+}
+.payslip-doc-table tfoot td {
+  border-top: 1px solid #111827;
+  border-bottom: 0;
+  font-weight: 700;
+}
+.payslip-doc-net {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #eef2ff;
+}
+.payslip-doc-net > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: #1f3a8a;
+  font-size: 14px;
+  font-weight: 700;
+}
+.payslip-doc-net strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.payslip-doc-net p {
+  margin-top: 6px;
+  color: #374151;
+}
+.payslip-doc-foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  color: #6b7280;
+  font-size: 11px;
+}
+.payslip-doc-foot dl {
+  max-width: 360px;
+  margin-bottom: 10px;
+}
+.my-payslips-list {
+  margin-top: 14px;
+}
+.my-payslips-list .is-month {
+  text-transform: capitalize;
+}
+.profile-page .my-payslips {
+  margin-top: 16px;
+}
+@media (max-width: 640px) {
+  .payslip-doc {
+    padding: 22px 16px;
+  }
+  .payslip-doc-head,
+  .payslip-doc-info {
+    display: block;
+  }
+  .payslip-doc-title {
+    margin-top: 12px;
+    text-align: left;
+  }
+  .payslip-doc-info dl + dl {
+    margin-top: 6px;
+  }
+  .payslip-doc-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  body.has-payslip-doc * {
+    visibility: hidden;
+  }
+  body.has-payslip-doc .payslip-doc,
+  body.has-payslip-doc .payslip-doc * {
+    visibility: visible;
+  }
+  body.has-payslip-doc .payslip-overlay {
+    position: static;
+    padding: 0;
+    background: #fff;
+    overflow: visible;
+  }
+  body.has-payslip-doc .payslip-doc {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    box-shadow: none;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
