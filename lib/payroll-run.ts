@@ -770,3 +770,15 @@ export async function saveCompany(company: PayrollCompany) {
     .eq("id", 1);
   if (error) throw new Error(error.message);
 }
+
+/** Validated or paid payslips with a period in [from, to] (exports). */
+export async function loadPublishedPayslips(from: string, to: string) {
+  const { data, error } = await createClient()
+    .from("payslips")
+    .select(`${PAYSLIP_SELECT}, payroll_runs!inner ( status )`)
+    .in("payroll_runs.status", ["validated", "paid"])
+    .gte("period", from)
+    .lte("period", to);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as PayslipRow[]).map(mapPayslip);
+}

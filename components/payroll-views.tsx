@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   Banknote,
   ChevronLeft,
   ChevronRight,
+  Download,
   FileText,
   Plus,
   Printer,
@@ -53,6 +55,7 @@ import {
   loadComponents,
   loadEmployeeComponents,
   loadMyPayslips,
+  loadPublishedPayslips,
   loadPayslips,
   loadRun,
   loadSettings,
@@ -75,6 +78,14 @@ import {
   type PayrollRun,
   type PayrollSettings,
 } from "@/lib/payroll-run";
+import {
+  annualTaxCsv,
+  bankTransferCsv,
+  cnssQuarterCsv,
+  missingRib,
+  payrollJournalCsv,
+  quarterMonths,
+} from "@/lib/payroll-export";
 import { createClient } from "@/lib/supabase/client";
 
 /** `flash` from the page shell changes every render; keep effects off it. */
@@ -597,6 +608,7 @@ export function PayrollView({
   const [state, setState] = useState<"loading" | "ready" | "missing-table">("loading");
   const [busy, setBusy] = useState(false);
   const [openPayslip, setOpenPayslip] = useState<Payslip | null>(null);
+  const [printing, setPrinting] = useState<Payslip[] | null>(null);
   const [showRates, setShowRates] = useState(false);
   const [confirm, setConfirm] = useState<"validate" | "paid" | "delete" | null>(null);
   const { year } = monthRange(period);
@@ -846,17 +858,17 @@ export function PayrollView({
                   <span>{t("payroll.tax")}</span>
                   <span>{t("payroll.deductions")}</span>
                   <span>{t("payroll.net")}</span>
+                  <span />
                 </div>
                 {sorted.map((payslip) => {
                   const employee = byEmployee.get(payslip.employeeId);
                   return (
-                    <button
-                      type="button"
-                      className="payroll-row"
-                      key={payslip.id}
-                      onClick={() => setOpenPayslip(payslip)}
-                    >
-                      <span className="table-member">
+                    <div className="payroll-row is-clickable" key={payslip.id}>
+                      <button
+                        type="button"
+                        className="table-member payroll-open"
+                        onClick={() => setOpenPayslip(payslip)}
+                      >
                         {employee && <Avatar e={employee} />}
                         <span>
                           <b>{payslip.inputs.employee.name}</b>
@@ -874,13 +886,22 @@ export function PayrollView({
                             )}
                           </span>
                         </span>
-                      </span>
+                      </button>
                       <span>{money(payslip.gross)}</span>
                       <span>{money(payslip.cnssEmployee)}</span>
                       <span>{money(payslip.irpp + payslip.css)}</span>
                       <span>{money(payslip.otherDeductions)}</span>
                       <b>{money(payslip.net)}</b>
-                    </button>
+                      <button
+                        type="button"
+                        className="icon-button payroll-row-print"
+                        aria-label={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
+                        title={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
+                        onClick={() => setPrinting([payslip])}
+                      >
+                        <Download size={15} />
+                      </button>
+                    </div>
                   );
                 })}
                 <div className="payroll-row payroll-total">
@@ -890,12 +911,25 @@ export function PayrollView({
                   <span>{money(totals.tax)}</span>
                   <span>{money(totals.deductions)}</span>
                   <b>{money(totals.net)}</b>
+                  <span />
                 </div>
               </>
             )}
           </div>
         </>
       )}
+
+      {run && state === "ready" && (
+        <PayrollExports
+          period={period}
+          run={run}
+          payslips={payslips}
+          flash={flash}
+          onPrintAll={() => setPrinting(sorted)}
+        />
+      )}
+
+      {printing && <PayslipDocument payslips={printing} onClose={() => setPrinting(null)} />}
 
       {openPayslip && (
         <PayslipPanel
@@ -1133,7 +1167,7 @@ function PayslipPanel({
       <button type="button" className="secondary-button payslip-view-button" onClick={() => setShowDocument(true)}>
         <Printer size={15} /> {t("payslip.view")}
       </button>
-      {showDocument && <PayslipDocument payslip={payslip} onClose={() => setShowDocument(false)} />}
+      {showDocument && <PayslipDocument payslips={[payslip]} onClose={() => setShowDocument(false)} />}
 
       {editable && (
         <div className="detail-block">
@@ -1632,11 +1666,10 @@ function frDate(iso: string | null | undefined) {
   return `${day}/${month}/${year}`;
 }
 
-export function PayslipDocument({ payslip, onClose }: { payslip: Payslip; onClose: () => void }) {
+/** Full-screen payslip viewer; several payslips print one per A4 page. */
+export function PayslipDocument({ payslips, onClose }: { payslips: Payslip[]; onClose: () => void }) {
   const { t } = useLanguage();
   const [company, setCompany] = useState<PayrollCompany | null>(null);
-  const { inputs } = payslip;
-  const { from, to } = monthRange(payslip.period);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -1655,6 +1688,34 @@ export function PayslipDocument({ payslip, onClose }: { payslip: Payslip; onClos
     };
   }, []);
 
+  // Rendered on <body> so printing can hide the rest of the app entirely.
+  return createPortal(
+    <div className="payslip-overlay" role="dialog" aria-modal="true" aria-label={t("payslip.view")}>
+      <div className="payslip-toolbar">
+        <span>
+          {payslips.length > 1 ? t("payslip.countHint", { count: payslips.length }) + " " : ""}
+          {t("payslip.printHint")}
+        </span>
+        <div>
+          <button type="button" className="primary-button" onClick={() => window.print()}>
+            <Printer size={15} /> {t("payslip.print")}
+          </button>
+          <button type="button" className="secondary-button" onClick={onClose}>
+            <X size={15} /> {t("payslip.close")}
+          </button>
+        </div>
+      </div>
+      {payslips.map((payslip) => (
+        <PayslipSheet key={payslip.id} payslip={payslip} company={company} />
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+function PayslipSheet({ payslip, company }: { payslip: Payslip; company: PayrollCompany | null }) {
+  const { inputs } = payslip;
+  const { from, to } = monthRange(payslip.period);
   const earnings = payslip.lines.filter((line) => line.kind === "earning");
   const withheld = payslip.lines.filter((line) => line.kind === "contribution" || line.kind === "deduction");
   const employer = payslip.lines.filter((line) => line.kind === "employer");
@@ -1677,19 +1738,6 @@ export function PayslipDocument({ payslip, onClose }: { payslip: Payslip; onClos
     .join(", ");
 
   return (
-    <div className="payslip-overlay" role="dialog" aria-modal="true" aria-label={t("payslip.view")}>
-      <div className="payslip-toolbar">
-        <span>{t("payslip.printHint")}</span>
-        <div>
-          <button type="button" className="primary-button" onClick={() => window.print()}>
-            <Printer size={15} /> {t("payslip.print")}
-          </button>
-          <button type="button" className="secondary-button" onClick={onClose}>
-            <X size={15} /> {t("payslip.close")}
-          </button>
-        </div>
-      </div>
-
       <article className="payslip-doc">
         <header className="payslip-doc-head">
           <div>
@@ -1796,7 +1844,6 @@ export function PayslipDocument({ payslip, onClose }: { payslip: Payslip; onClos
           <p>Conservez ce bulletin sans limitation de durée.</p>
         </section>
       </article>
-    </div>
   );
 }
 
@@ -1860,7 +1907,134 @@ export function MyPayslips({
           ))}
         </div>
       )}
-      {open && <PayslipDocument payslip={open} onClose={() => setOpen(null)} />}
+      {open && <PayslipDocument payslips={[open]} onClose={() => setOpen(null)} />}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Exports (CSV for the accountant and the bank portal)
+// ---------------------------------------------------------------------------
+
+function downloadCsv(filename: string, csv: string) {
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function PayrollExports({
+  period,
+  run,
+  payslips,
+  flash,
+  onPrintAll,
+}: {
+  period: string;
+  run: PayrollRun;
+  payslips: Payslip[];
+  flash: (message: string) => void;
+  onPrintAll: () => void;
+}) {
+  const { t } = useLanguage();
+  const [busy, setBusy] = useState<string | null>(null);
+  const published = run.status !== "draft";
+  const months = quarterMonths(period);
+  const quarter = Math.floor((Number(period.slice(5, 7)) - 1) / 3) + 1;
+  const year = Number(period.slice(0, 4));
+  const noRib = missingRib(payslips);
+
+  const exportBank = () => {
+    if (!published) return flash(t("export.validateFirst"));
+    downloadCsv(`virements-${period}.csv`, bankTransferCsv(payslips, `Salaire ${period}`));
+    if (noRib.length) {
+      flash(t("export.missingRib", { names: noRib.map((item) => item.inputs.employee.name).join(", ") }));
+    }
+  };
+
+  const exportJournal = () => {
+    downloadCsv(
+      `journal-paie-${period}${published ? "" : "-brouillon"}.csv`,
+      payrollJournalCsv(payslips),
+    );
+  };
+
+  const exportRange = async (kind: "quarter" | "year") => {
+    if (busy) return;
+    setBusy(kind);
+    try {
+      const from = kind === "quarter" ? monthRange(months[0]).from : `${year}-01-01`;
+      const to = kind === "quarter" ? monthRange(months[2]).to : `${year}-12-31`;
+      const rows = await loadPublishedPayslips(from, to);
+      if (!rows.length) {
+        flash(t("export.nothingValidated"));
+      } else if (kind === "quarter") {
+        downloadCsv(`cnss-${year}-T${quarter}.csv`, cnssQuarterCsv(rows, period));
+      } else {
+        downloadCsv(`retenues-${year}.csv`, annualTaxCsv(rows, year));
+      }
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setBusy(null);
+  };
+
+  return (
+    <section className="card payroll-exports">
+      <div>
+        <p className="eyebrow">{t("export.title")}</p>
+        <p className="contract-hint">{t("export.note")}</p>
+      </div>
+      <div className="payroll-export-grid">
+        <button
+          type="button"
+          className="payroll-export"
+          onClick={onPrintAll}
+          disabled={payslips.length === 0}
+        >
+          <Printer size={16} />
+          <span>
+            <b>{t("payslip.exportAll")}</b>
+            <small>
+              {published
+                ? t("payslip.exportAllNote", { count: payslips.length })
+                : t("payslip.exportAllDraft")}
+            </small>
+          </span>
+        </button>
+        <button type="button" className="payroll-export" onClick={exportBank} disabled={!published}>
+          <Download size={16} />
+          <span>
+            <b>{t("export.bank")}</b>
+            <small>{published ? t("export.bankNote") : t("export.validateFirst")}</small>
+          </span>
+        </button>
+        <button type="button" className="payroll-export" onClick={exportJournal}>
+          <Download size={16} />
+          <span>
+            <b>{t("export.journal")}</b>
+            <small>{published ? t("export.journalNote") : t("export.journalDraftNote")}</small>
+          </span>
+        </button>
+        <button type="button" className="payroll-export" onClick={() => void exportRange("quarter")}>
+          <Download size={16} />
+          <span>
+            <b>{t("export.cnss", { quarter, year })}</b>
+            <small>{busy === "quarter" ? t("panel.pleaseWait") : t("export.cnssNote")}</small>
+          </span>
+        </button>
+        <button type="button" className="payroll-export" onClick={() => void exportRange("year")}>
+          <Download size={16} />
+          <span>
+            <b>{t("export.annual", { year })}</b>
+            <small>{busy === "year" ? t("panel.pleaseWait") : t("export.annualNote")}</small>
+          </span>
+        </button>
+      </div>
     </section>
   );
 }
