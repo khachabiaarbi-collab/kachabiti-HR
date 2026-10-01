@@ -10,8 +10,8 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
-  Menu,
   Search,
+  UserRound,
   Settings,
   ShieldCheck,
   Users,
@@ -45,26 +45,97 @@ const adminNav = [
   { label: "Analytics", icon: Activity },
 ];
 
+const employeeNav = [
+  { label: "Overview", icon: LayoutDashboard },
+  { label: "Time clock", icon: Clock3 },
+  { label: "My requests", icon: FileText },
+  { label: "Calendar", icon: CalendarDays },
+  { label: "My profile", icon: UserRound },
+];
+
+export function EmployeeTabBar({
+  active,
+  setActive,
+}: {
+  active: string;
+  setActive: (label: string) => void;
+}) {
+  const t = useLanguage().t;
+  return (
+    <nav className="employee-tabbar" aria-label={t("chrome.mainNav")}>
+      {employeeNav.map(({ label, icon: Icon }) => (
+        <button
+          key={label}
+          type="button"
+          className={active === label ? "active" : ""}
+          onClick={() => setActive(label)}
+          aria-current={active === label ? "page" : undefined}
+        >
+          <Icon size={19} />
+          <span>{screenLabel(t, label)}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function Sidebar({
   active,
   setActive,
   logout,
   currentEmployee,
   requests = [],
+  mobileOpen = false,
+  onCloseMobile,
 }: {
   active: string;
   setActive: (label: string) => void;
   logout: () => void;
   currentEmployee: Employee | null;
   requests?: LeaveRequest[];
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }) {
   const t = useLanguage().t;
+  const go = (label: string) => {
+    setActive(label);
+    onCloseMobile?.();
+  };
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseMobile?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen, onCloseMobile]);
+
   return (
-    <aside className="sidebar admin-sidebar">
+    <>
+    {mobileOpen && (
+      <div className="sidebar-backdrop" onClick={onCloseMobile} aria-hidden="true" />
+    )}
+    <aside
+      id="admin-sidebar"
+      className={`sidebar admin-sidebar ${mobileOpen ? "is-mobile-open" : ""}`}
+    >
       <div className="sidebar-top">
-        <Logo />
-        <button className="icon-button mobile-menu">
-          <Menu size={19} />
+        <button
+          type="button"
+          className="brand-home"
+          onClick={() => go("Overview")}
+          aria-label={t("nav.overview")}
+        >
+          <Logo />
+        </button>
+        <button
+          type="button"
+          className="icon-button mobile-menu"
+          onClick={onCloseMobile}
+          aria-label={t("chrome.closeMenu")}
+        >
+          <X size={19} />
         </button>
       </div>
       <div className="mode-badge">
@@ -86,7 +157,8 @@ export function Sidebar({
             <button
               key={item.label}
               className={`nav-item ${active === item.label ? "nav-item-active" : ""}`}
-              onClick={() => setActive(item.label)}
+              onClick={() => go(item.label)}
+              aria-current={active === item.label ? "page" : undefined}
             >
               <Icon size={18} />
               <span>{screenLabel(t, item.label)}</span>
@@ -99,7 +171,8 @@ export function Sidebar({
         <p className="nav-label nav-label-spaced">{t("nav.workspace")}</p>
         <button
           className={`nav-item ${active === "Settings" ? "nav-item-active" : ""}`}
-          onClick={() => setActive("Settings")}
+          onClick={() => go("Settings")}
+          aria-current={active === "Settings" ? "page" : undefined}
         >
           <Settings size={18} />
           {t("nav.settings")}
@@ -121,12 +194,19 @@ export function Sidebar({
               {translateRole(t, currentEmployee?.role ?? "Admin")}
             </p>
           </div>
-          <button className="logout-icon" onClick={logout}>
+          <button
+            type="button"
+            className="logout-icon"
+            onClick={logout}
+            aria-label={t("chrome.logOut")}
+            title={t("chrome.logOut")}
+          >
             <LogOut size={16} />
           </button>
         </div>
       </div>
     </aside>
+    </>
   );
 }
 
@@ -142,13 +222,21 @@ export function EmployeeNav({
   const t = useLanguage().t;
   return (
     <div className="employee-nav">
-      <Logo />
+      <button
+        type="button"
+        className="brand-home"
+        onClick={() => setActive("Overview")}
+        aria-label={t("nav.overview")}
+      >
+        <Logo />
+      </button>
       <nav>
-        {["Overview", "Time clock", "My requests", "Calendar", "My profile"].map((item) => (
+        {employeeNav.map(({ label: item }) => (
           <button
             key={item}
             className={active === item ? "active" : ""}
             onClick={() => setActive(item)}
+            aria-current={active === item ? "page" : undefined}
           >
             {screenLabel(t, item)}
           </button>
