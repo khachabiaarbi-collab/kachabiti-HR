@@ -47,7 +47,7 @@ const monthly = (baseSalary: number, extra: Partial<PayContract> = {}): PayContr
   ...extra,
 });
 
-const noVariables: PayVariables = { workedHours: 0, unpaidDays: 0, absenceHours: 0, overtimeHours: 0 };
+const noVariables: PayVariables = { workedHours: 0, unpaidDays: 0, outsideContractDays: 0, absenceHours: 0, overtimeHours: 0 };
 
 test("1500 TND, single, no extras", () => {
   const result = calculatePayslip(monthly(1500), rates2026, noVariables);
@@ -90,7 +90,7 @@ test("unpaid day, overtime, bonus and advance", () => {
   const result = calculatePayslip(
     monthly(1850),
     rates2026,
-    { workedHours: 0, unpaidDays: 1, absenceHours: 0, overtimeHours: 10 },
+    { workedHours: 0, unpaidDays: 1, outsideContractDays: 0, absenceHours: 0, overtimeHours: 10 },
     [
       { code: "transport", label: "Prime de transport", kind: "earning", amount: 80, subjectToCnss: true, taxable: true },
       { code: "advance", label: "Avance sur salaire", kind: "deduction", amount: 200, subjectToCnss: false, taxable: false },
@@ -128,17 +128,25 @@ test("absences never push the base below zero", () => {
   const result = calculatePayslip(
     monthly(1000),
     rates2026,
-    { workedHours: 0, unpaidDays: 40, absenceHours: 50, overtimeHours: 0 },
+    { workedHours: 0, unpaidDays: 40, outsideContractDays: 5, absenceHours: 50, overtimeHours: 0 },
   );
   assert.equal(result.gross, 0);
   assert.equal(result.net, 0);
+});
+
+test("hire on the 15th removes the days before it", () => {
+  // 48h week: 1500 / 208 h × 8 h = 57.692 per day; 12 working days before hire.
+  const result = calculatePayslip(monthly(1500), rates2026, { ...noVariables, outsideContractDays: 12 });
+  const outside = result.lines.find((line) => line.code === "outside");
+  assert.equal(outside?.amount, -692.308);
+  assert.equal(result.gross, 807.692);
 });
 
 test("hourly contract pays worked hours", () => {
   const result = calculatePayslip(
     { ...monthly(0), payBasis: "hourly", hourlyRate: 7.5 },
     rates2026,
-    { workedHours: 160, unpaidDays: 3, absenceHours: 0, overtimeHours: 0 },
+    { workedHours: 160, unpaidDays: 3, outsideContractDays: 2, absenceHours: 0, overtimeHours: 0 },
   );
   assert.equal(result.gross, 1200);
   assert.ok(!result.lines.some((line) => line.code === "unpaid"));

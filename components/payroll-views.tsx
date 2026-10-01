@@ -1,8 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button, Field } from "@/components/primitives";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Banknote,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Plus,
+  RefreshCw,
+  Settings2,
+  Trash2,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react";
+import type { Employee } from "@/lib/app-types";
+import { ConfirmModal } from "@/components/modals";
+import { Avatar, Button, Field, Header, Metric } from "@/components/primitives";
 import { useLanguage } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/messages";
 import { formatDisplayDate, isoDate } from "@/lib/map-rows";
 import {
   CONTRACT_SELECT,
@@ -19,7 +36,42 @@ import {
   type MaritalStatus,
   type PayBasis,
 } from "@/lib/payroll";
+import { round3, type IrppBracket, type PayItem, type PayVariables } from "@/lib/payroll-calc";
+import {
+  addEmployeeComponent,
+  deleteDraftRun,
+  effectiveVariables,
+  endEmployeeComponent,
+  loadComponents,
+  loadEmployeeComponents,
+  loadPayslips,
+  loadRun,
+  loadSettings,
+  monthLabel,
+  monthRange,
+  prepareRun,
+  ratesOnly,
+  saveComponent,
+  saveSettings,
+  setRunStatus,
+  shiftMonth,
+  toPayItem,
+  updatePayslip,
+  type EmployeePayComponent,
+  type PayComponent,
+  type Payslip,
+  type PayslipWarning,
+  type PayrollRun,
+  type PayrollSettings,
+} from "@/lib/payroll-run";
 import { createClient } from "@/lib/supabase/client";
+
+/** `flash` from the page shell changes every render; keep effects off it. */
+function useStableFlash(flash: (message: string) => void) {
+  const ref = useRef(flash);
+  ref.current = flash;
+  return useCallback((message: string) => ref.current(message), []);
+}
 
 type ContractForm = {
   effectiveFrom: string;
@@ -358,6 +410,1133 @@ export function ContractSection({
             ? t("contract.saveNewVersion")
             : t("contract.save")}
       </Button>
+      {contracts.length > 0 && <FixedComponentsSection employeeId={employeeId} flash={flash} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recurring bonuses and deductions of one employee
+// ---------------------------------------------------------------------------
+
+function FixedComponentsSection({
+  employeeId,
+  flash: rawFlash,
+}: {
+  employeeId: string;
+  flash: (message: string) => void;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  const today = isoDate(new Date());
+  const [catalog, setCatalog] = useState<PayComponent[]>([]);
+  const [items, setItems] = useState<EmployeePayComponent[]>([]);
+  const [componentId, setComponentId] = useState("");
+  const [amountValue, setAmountValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    const [components, current] = await Promise.all([
+      loadComponents(),
+      loadEmployeeComponents(today, "9999-12-31", employeeId),
+    ]);
+    setCatalog(components);
+    setItems(current);
+  }, [employeeId, today]);
+
+  useEffect(() => {
+    reload().catch((error: Error) => flash(error.message));
+  }, [reload, flash]);
+
+  const byId = new Map(catalog.map((component) => [component.id, component]));
+  const active = catalog.filter((component) => component.active);
+
+  const add = async () => {
+    const value = amount(amountValue);
+    if (!componentId || !value || busy) return flash(t("payroll.errorAmount"));
+    setBusy(true);
+    try {
+      // Applies from the 1st of the current month.
+      await addEmployeeComponent(employeeId, componentId, value, `${today.slice(0, 7)}-01`);
+      setComponentId("");
+      setAmountValue("");
+      await reload();
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setBusy(false);
+  };
+
+  const stop = async (item: EmployeePayComponent) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Last month is the final one it applies to.
+      const lastDay = monthRange(shiftMonth(today.slice(0, 7), -1)).to;
+      await endEmployeeComponent(item, lastDay);
+      await reload();
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <p className="eyebrow contract-subhead">{t("payroll.fixedTitle")}</p>
+      <span className="contract-hint">{t("payroll.fixedNote")}</span>
+      {items.length === 0 ? (
+        <span className="contract-hint">{t("payroll.fixedEmpty")}</span>
+      ) : (
+        <div className="pay-item-list">
+          {items.map((item) => {
+            const component = byId.get(item.componentId);
+            return (
+              <div className="pay-item" key={item.id}>
+                <div>
+                  <b>{component?.name ?? "—"}</b>
+                  <span>
+                    {t(component?.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}
+                    {" · "}
+                    {t("payroll.since", { date: formatDisplayDate(item.startsOn, dateLocale) })}
+                  </span>
+                </div>
+                <strong>{formatTnd(item.amount, dateLocale)}</strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={t("payroll.stopItem")}
+                  title={t("payroll.stopItem")}
+                  onClick={() => void stop(item)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="pay-item-add">
+        <select
+          aria-label={t("payroll.component")}
+          value={componentId}
+          onChange={(event) => setComponentId(event.target.value)}
+        >
+          <option value="">{t("payroll.chooseComponent")}</option>
+          {active.map((component) => (
+            <option key={component.id} value={component.id}>
+              {component.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          step="0.001"
+          min="0"
+          aria-label={t("payroll.amount")}
+          placeholder={t("payroll.amount")}
+          value={amountValue}
+          onChange={(event) => setAmountValue(event.target.value)}
+        />
+        <button type="button" className="secondary-button" onClick={() => void add()}>
+          <Plus size={14} /> {t("payroll.add")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin: Payroll screen
+// ---------------------------------------------------------------------------
+
+const WARNING_KEYS: Record<PayslipWarning, MessageKey> = {
+  rates_unverified: "payroll.warn.rates_unverified",
+  no_cnss_number: "payroll.warn.no_cnss_number",
+  no_rib: "payroll.warn.no_rib",
+  hourly_no_hours: "payroll.warn.hourly_no_hours",
+  negative_net: "payroll.warn.negative_net",
+  contract_ends: "payroll.warn.contract_ends",
+};
+
+const STATUS_KEYS: Record<PayrollRun["status"], MessageKey> = {
+  draft: "payroll.status.draft",
+  validated: "payroll.status.validated",
+  paid: "payroll.status.paid",
+};
+
+export function PayrollView({
+  employees,
+  flash: rawFlash,
+}: {
+  employees: Employee[];
+  flash: (message: string) => void;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  // Early in the month, payroll is usually being prepared for the month just ended.
+  const [period, setPeriod] = useState(() => {
+    const today = isoDate(new Date());
+    return Number(today.slice(8, 10)) <= 10 ? shiftMonth(today.slice(0, 7), -1) : today.slice(0, 7);
+  });
+  const [run, setRun] = useState<PayrollRun | null>(null);
+  const [payslips, setPayslips] = useState<Payslip[]>([]);
+  const [settings, setSettings] = useState<PayrollSettings | null>(null);
+  const [missing, setMissing] = useState<Employee[] | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "missing-table">("loading");
+  const [busy, setBusy] = useState(false);
+  const [openPayslip, setOpenPayslip] = useState<Payslip | null>(null);
+  const [showRates, setShowRates] = useState(false);
+  const [confirm, setConfirm] = useState<"validate" | "paid" | "delete" | null>(null);
+  const { year } = monthRange(period);
+
+  const load = useCallback(async () => {
+    setState("loading");
+    try {
+      const [nextRun, nextSettings] = await Promise.all([loadRun(period), loadSettings(year)]);
+      setRun(nextRun);
+      setSettings(nextSettings);
+      setPayslips(nextRun ? await loadPayslips(nextRun.id) : []);
+      setMissing(null);
+      setState("ready");
+    } catch (error) {
+      const message = (error as Error).message;
+      if (isMissingPayrollTable(message)) setState("missing-table");
+      else {
+        flash(message);
+        setState("ready");
+      }
+    }
+  }, [period, year, flash]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const byEmployee = useMemo(
+    () => new Map(employees.map((employee) => [employee.id, employee])),
+    [employees],
+  );
+  const sorted = useMemo(
+    () => [...payslips].sort((a, b) => a.inputs.employee.name.localeCompare(b.inputs.employee.name)),
+    [payslips],
+  );
+  const totals = useMemo(
+    () =>
+      payslips.reduce(
+        (sum, payslip) => ({
+          gross: sum.gross + payslip.gross,
+          net: sum.net + payslip.net,
+          employerCost: sum.employerCost + payslip.employerCost,
+          cnss: sum.cnss + payslip.cnssEmployee,
+          tax: sum.tax + payslip.irpp + payslip.css,
+          deductions: sum.deductions + payslip.otherDeductions,
+        }),
+        { gross: 0, net: 0, employerCost: 0, cnss: 0, tax: 0, deductions: 0 },
+      ),
+    [payslips],
+  );
+  const notIncluded =
+    missing ??
+    (run
+      ? employees.filter(
+          (employee) =>
+            employee.status !== "Inactive" &&
+            !payslips.some((payslip) => payslip.employeeId === employee.id),
+        )
+      : []);
+  const money = (value: number) => formatTnd(round3(value), dateLocale);
+
+  const prepare = async () => {
+    if (!settings) return flash(t("payroll.noRates", { year }));
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await prepareRun(period, employees, settings);
+      setRun(result.run);
+      setPayslips(await loadPayslips(result.run.id));
+      setMissing(result.missingContract);
+      flash(t("payroll.prepared"));
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setBusy(false);
+  };
+
+  const changeStatus = async (status: PayrollRun["status"]) => {
+    if (!run || !settings) return;
+    try {
+      await setRunStatus(run, status, ratesOnly(settings));
+      setConfirm(null);
+      await load();
+      flash(t(status === "paid" ? "payroll.markedPaid" : "payroll.validatedToast"));
+    } catch (error) {
+      flash((error as Error).message);
+    }
+  };
+
+  if (state === "missing-table") {
+    return (
+      <>
+        <Header eyebrow={t("payroll.eyebrow")} title={t("nav.payroll")} action={null} />
+        <div className="card payroll-empty">
+          <AlertTriangle size={20} />
+          <p>{t("contract.missingTable")}</p>
+        </div>
+      </>
+    );
+  }
+
+  const isDraft = run?.status === "draft";
+  const blockingRates = !settings?.verified;
+
+  return (
+    <div className="payroll-page">
+      <Header
+        eyebrow={t("payroll.eyebrow")}
+        title={t("nav.payroll")}
+        action={
+          <div className="payroll-header-actions">
+            <div className="month-switcher" role="group" aria-label={t("payroll.month")}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("common.previous")}
+                onClick={() => setPeriod((current) => shiftMonth(current, -1))}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span>{monthLabel(period, dateLocale)}</span>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("common.next")}
+                onClick={() => setPeriod((current) => shiftMonth(current, 1))}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <Button secondary onClick={() => setShowRates(true)}>
+              <Settings2 size={15} /> {t("payroll.ratesButton")}
+            </Button>
+          </div>
+        }
+      />
+
+      {state === "ready" && blockingRates && (
+        <div className="payroll-banner">
+          <AlertTriangle size={17} />
+          <p>
+            {settings
+              ? t("payroll.ratesUnverified", { year })
+              : t("payroll.noRates", { year })}
+          </p>
+          <button type="button" className="secondary-button" onClick={() => setShowRates(true)}>
+            {t("payroll.reviewRates")}
+          </button>
+        </div>
+      )}
+
+      {state === "loading" ? (
+        <div className="workspace-loading" role="status">
+          <span>{t("chrome.loading")}</span>
+        </div>
+      ) : !run ? (
+        <div className="card payroll-empty">
+          <Wallet size={22} />
+          <h2>{t("payroll.emptyTitle", { month: monthLabel(period, dateLocale) })}</h2>
+          <p>{t("payroll.emptyCopy")}</p>
+          <Button onClick={() => void prepare()}>
+            {busy ? t("panel.pleaseWait") : t("payroll.prepare")}
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="metric-grid">
+            <Metric
+              label={t("payroll.totalGross")}
+              value={money(totals.gross)}
+              note={t("payroll.employeesCount", { count: payslips.length })}
+              tone="indigo"
+              icon={<Banknote size={17} />}
+            />
+            <Metric
+              label={t("payroll.totalNet")}
+              value={money(totals.net)}
+              note={t("payroll.toTransfer")}
+              tone="teal"
+              icon={<Wallet size={17} />}
+            />
+            <Metric
+              label={t("payroll.totalCharges")}
+              value={money(totals.cnss + totals.tax)}
+              note={t("payroll.chargesNote")}
+              tone="amber"
+              icon={<FileText size={17} />}
+            />
+            <Metric
+              label={t("payroll.employerCost")}
+              value={money(totals.employerCost)}
+              note={t("payroll.employerCostNote")}
+              tone="rose"
+              icon={<Users size={17} />}
+            />
+          </div>
+
+          <div className="card table-card payroll-table">
+            <div className="payroll-table-top">
+              <span className={`payroll-status is-${run.status}`}>{t(STATUS_KEYS[run.status])}</span>
+              <span className="payroll-status-note">
+                {run.status === "draft"
+                  ? t("payroll.draftNote")
+                  : run.status === "validated"
+                    ? t("payroll.validatedNote", {
+                        date: formatDisplayDate(run.validatedAt?.slice(0, 10), dateLocale),
+                      })
+                    : t("payroll.paidNote", {
+                        date: formatDisplayDate(run.paidAt?.slice(0, 10), dateLocale),
+                      })}
+              </span>
+              <div className="payroll-table-actions">
+                {isDraft && (
+                  <>
+                    <button type="button" className="secondary-button" onClick={() => setConfirm("delete")}>
+                      <Trash2 size={14} /> {t("payroll.deleteDraft")}
+                    </button>
+                    <button type="button" className="secondary-button" onClick={() => void prepare()}>
+                      <RefreshCw size={14} /> {busy ? t("panel.pleaseWait") : t("payroll.recalculate")}
+                    </button>
+                    <Button onClick={() => setConfirm("validate")}>{t("payroll.validate")}</Button>
+                  </>
+                )}
+                {run.status === "validated" && (
+                  <Button onClick={() => setConfirm("paid")}>{t("payroll.markPaid")}</Button>
+                )}
+              </div>
+            </div>
+
+            {notIncluded.length > 0 && (
+              <p className="payroll-missing">
+                <AlertTriangle size={14} />
+                {t("payroll.notIncluded", {
+                  names: notIncluded.map((employee) => employee.name).join(", "),
+                })}
+              </p>
+            )}
+
+            {sorted.length === 0 ? (
+              <p className="table-empty">{t("payroll.noPayslips")}</p>
+            ) : (
+              <>
+                <div className="payroll-row payroll-head">
+                  <span>{t("admin.colEmployee")}</span>
+                  <span>{t("payroll.gross")}</span>
+                  <span>{t("payroll.cnss")}</span>
+                  <span>{t("payroll.tax")}</span>
+                  <span>{t("payroll.deductions")}</span>
+                  <span>{t("payroll.net")}</span>
+                </div>
+                {sorted.map((payslip) => {
+                  const employee = byEmployee.get(payslip.employeeId);
+                  return (
+                    <button
+                      type="button"
+                      className="payroll-row"
+                      key={payslip.id}
+                      onClick={() => setOpenPayslip(payslip)}
+                    >
+                      <span className="table-member">
+                        {employee && <Avatar e={employee} />}
+                        <span>
+                          <b>{payslip.inputs.employee.name}</b>
+                          <span>
+                            {payslip.warnings.filter((warning) => warning !== "rates_unverified").length > 0 ? (
+                              <span className="payroll-warn-count">
+                                <AlertTriangle size={12} />
+                                {payslip.warnings
+                                  .filter((warning) => warning !== "rates_unverified")
+                                  .map((warning) => t(WARNING_KEYS[warning]))
+                                  .join(" · ")}
+                              </span>
+                            ) : (
+                              payslip.inputs.employee.jobTitle ?? payslip.inputs.employee.department
+                            )}
+                          </span>
+                        </span>
+                      </span>
+                      <span>{money(payslip.gross)}</span>
+                      <span>{money(payslip.cnssEmployee)}</span>
+                      <span>{money(payslip.irpp + payslip.css)}</span>
+                      <span>{money(payslip.otherDeductions)}</span>
+                      <b>{money(payslip.net)}</b>
+                    </button>
+                  );
+                })}
+                <div className="payroll-row payroll-total">
+                  <span>{t("payroll.total")}</span>
+                  <span>{money(totals.gross)}</span>
+                  <span>{money(totals.cnss)}</span>
+                  <span>{money(totals.tax)}</span>
+                  <span>{money(totals.deductions)}</span>
+                  <b>{money(totals.net)}</b>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {openPayslip && (
+        <PayslipPanel
+          key={openPayslip.id}
+          payslip={openPayslip}
+          editable={isDraft}
+          verified={Boolean(settings?.verified)}
+          close={() => setOpenPayslip(null)}
+          flash={flash}
+          onSaved={async () => {
+            if (!run) return;
+            const next = await loadPayslips(run.id);
+            setPayslips(next);
+            setOpenPayslip(next.find((item) => item.id === openPayslip.id) ?? null);
+          }}
+        />
+      )}
+
+      {showRates && (
+        <RatesPanel
+          year={year}
+          initial={settings}
+          close={() => setShowRates(false)}
+          flash={flash}
+          onSaved={async () => {
+            setSettings(await loadSettings(year));
+          }}
+        />
+      )}
+
+      {confirm === "validate" && (
+        <ConfirmModal
+          danger={false}
+          title={t("payroll.validateTitle", { month: monthLabel(period, dateLocale) })}
+          message={
+            blockingRates
+              ? t("payroll.validateBlocked", { year })
+              : t("payroll.validateMessage", { count: payslips.length, net: money(totals.net) })
+          }
+          confirmLabel={blockingRates ? t("payroll.reviewRates") : t("payroll.validate")}
+          close={() => setConfirm(null)}
+          confirm={async () => {
+            if (blockingRates) {
+              setConfirm(null);
+              setShowRates(true);
+              return;
+            }
+            await changeStatus("validated");
+          }}
+        />
+      )}
+      {confirm === "paid" && (
+        <ConfirmModal
+          danger={false}
+          title={t("payroll.markPaid")}
+          message={t("payroll.paidMessage", { net: money(totals.net) })}
+          confirmLabel={t("payroll.markPaid")}
+          close={() => setConfirm(null)}
+          confirm={() => changeStatus("paid")}
+        />
+      )}
+      {confirm === "delete" && run && (
+        <ConfirmModal
+          title={t("payroll.deleteDraft")}
+          message={t("payroll.deleteMessage", { month: monthLabel(period, dateLocale) })}
+          confirmLabel={t("common.delete")}
+          close={() => setConfirm(null)}
+          confirm={async () => {
+            try {
+              await deleteDraftRun(run);
+              setConfirm(null);
+              await load();
+            } catch (error) {
+              flash((error as Error).message);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One payslip: lines, variables and one-off items
+// ---------------------------------------------------------------------------
+
+const VARIABLE_FIELDS: { key: keyof PayVariables; label: MessageKey; hourlyOnly?: boolean; monthlyOnly?: boolean }[] = [
+  { key: "workedHours", label: "payroll.var.workedHours", hourlyOnly: true },
+  { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true },
+  { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true },
+  { key: "absenceHours", label: "payroll.var.absenceHours", monthlyOnly: true },
+  { key: "overtimeHours", label: "payroll.var.overtimeHours" },
+];
+
+export function PayslipLines({ payslip }: { payslip: Payslip }) {
+  const { t, dateLocale } = useLanguage();
+  const money = (value: number) => formatTnd(value, dateLocale);
+  const groups: { kind: Payslip["lines"][number]["kind"]; title: MessageKey }[] = [
+    { kind: "earning", title: "payroll.linesEarnings" },
+    { kind: "contribution", title: "payroll.linesContributions" },
+    { kind: "deduction", title: "payroll.linesDeductions" },
+  ];
+  return (
+    <div className="payslip-lines">
+      {groups.map(({ kind, title }) => {
+        const lines = payslip.lines.filter((line) => line.kind === kind);
+        if (!lines.length) return null;
+        return (
+          <div key={kind} className="payslip-group">
+            <p className="eyebrow">{t(title)}</p>
+            {lines.map((line, index) => (
+              <div className="payslip-line" key={`${line.code}-${index}`}>
+                <span>
+                  {line.label}
+                  {line.rate != null && line.kind === "contribution" && (
+                    <small> · {(line.rate * 100).toLocaleString(dateLocale, { maximumFractionDigits: 3 })} %</small>
+                  )}
+                  {line.base != null && line.kind === "earning" && (
+                    <small> · {line.base.toLocaleString(dateLocale)}</small>
+                  )}
+                </span>
+                <b className={line.amount < 0 ? "is-negative" : undefined}>{money(line.amount)}</b>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+      <div className="payslip-net">
+        <span>{t("payroll.net")}</span>
+        <b>{money(payslip.net)}</b>
+      </div>
+    </div>
+  );
+}
+
+function PayslipPanel({
+  payslip,
+  editable,
+  verified,
+  close,
+  flash: rawFlash,
+  onSaved,
+}: {
+  payslip: Payslip;
+  editable: boolean;
+  verified: boolean;
+  close: () => void;
+  flash: (message: string) => void;
+  onSaved: () => Promise<void>;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  const { inputs } = payslip;
+  const [values, setValues] = useState<Record<keyof PayVariables, string>>(() => {
+    const current = effectiveVariables(inputs);
+    return {
+      workedHours: String(current.workedHours),
+      unpaidDays: String(current.unpaidDays),
+      outsideContractDays: String(current.outsideContractDays ?? 0),
+      absenceHours: String(current.absenceHours),
+      overtimeHours: String(current.overtimeHours),
+    };
+  });
+  const [oneOff, setOneOff] = useState<PayItem[]>(inputs.oneOff);
+  const [catalog, setCatalog] = useState<PayComponent[]>([]);
+  const [componentId, setComponentId] = useState("");
+  const [amountValue, setAmountValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editable) return;
+    loadComponents()
+      .then((components) => setCatalog(components.filter((component) => component.active)))
+      .catch((error: Error) => flash(error.message));
+  }, [editable, flash]);
+
+  const fields = VARIABLE_FIELDS.filter((field) =>
+    inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly,
+  );
+
+  const addOneOff = () => {
+    const component = catalog.find((item) => item.id === componentId);
+    const value = amount(amountValue);
+    if (!component || !value) return flash(t("payroll.errorAmount"));
+    setOneOff((current) => [...current, toPayItem(component, value)]);
+    setComponentId("");
+    setAmountValue("");
+  };
+
+  const save = async () => {
+    if (saving) return;
+    const manual: Partial<PayVariables> = {};
+    for (const field of fields) {
+      const value = amount(values[field.key]);
+      if (value == null) return flash(t("payroll.errorNumber"));
+      if (value !== (inputs.auto[field.key] ?? 0)) manual[field.key] = value;
+    }
+    setSaving(true);
+    try {
+      await updatePayslip(payslip, manual, oneOff, verified);
+      await onSaved();
+      flash(t("payroll.payslipSaved"));
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="side-panel payslip-panel">
+      <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
+        <X size={18} />
+      </button>
+      <p className="eyebrow">{monthLabel(payslip.period, dateLocale)}</p>
+      <h2>{inputs.employee.name}</h2>
+      <p>
+        {t(`contract.type.${inputs.contract.contractType}`)} ·{" "}
+        {inputs.contract.payBasis === "hourly"
+          ? `${formatTnd(inputs.contract.hourlyRate ?? 0, dateLocale)}/h`
+          : formatTnd(inputs.contract.baseSalary, dateLocale)}
+      </p>
+
+      {payslip.warnings.length > 0 && (
+        <ul className="payslip-warnings">
+          {payslip.warnings.map((warning) => (
+            <li key={warning}>
+              <AlertTriangle size={13} /> {t(WARNING_KEYS[warning])}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <PayslipLines payslip={payslip} />
+
+      {editable && (
+        <div className="detail-block">
+          <p className="eyebrow">{t("payroll.adjustTitle")}</p>
+          <span className="contract-hint">{t("payroll.adjustNote")}</span>
+          {fields.map((field) => (
+            <label className="form-label" key={field.key}>
+              {t(field.label)}
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                value={values[field.key]}
+                onChange={(event) =>
+                  setValues((current) => ({ ...current, [field.key]: event.target.value }))
+                }
+              />
+              <small className="contract-hint">
+                {t("payroll.autoValue", { value: String(inputs.auto[field.key] ?? 0) })}
+              </small>
+            </label>
+          ))}
+
+          <p className="eyebrow contract-subhead">{t("payroll.oneOffTitle")}</p>
+          {oneOff.length === 0 ? (
+            <span className="contract-hint">{t("payroll.oneOffEmpty")}</span>
+          ) : (
+            <div className="pay-item-list">
+              {oneOff.map((item, index) => (
+                <div className="pay-item" key={`${item.code}-${index}`}>
+                  <div>
+                    <b>{item.label}</b>
+                    <span>{t(item.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}</span>
+                  </div>
+                  <strong>{formatTnd(item.amount, dateLocale)}</strong>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={t("common.delete")}
+                    onClick={() => setOneOff((current) => current.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="pay-item-add">
+            <select
+              aria-label={t("payroll.component")}
+              value={componentId}
+              onChange={(event) => setComponentId(event.target.value)}
+            >
+              <option value="">{t("payroll.chooseComponent")}</option>
+              {catalog.map((component) => (
+                <option key={component.id} value={component.id}>
+                  {component.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              step="0.001"
+              min="0"
+              aria-label={t("payroll.amount")}
+              placeholder={t("payroll.amount")}
+              value={amountValue}
+              onChange={(event) => setAmountValue(event.target.value)}
+            />
+            <button type="button" className="secondary-button" onClick={addOneOff}>
+              <Plus size={14} /> {t("payroll.add")}
+            </button>
+          </div>
+
+          <Button onClick={() => void save()}>
+            {saving ? t("modal.saving") : t("payroll.saveAndRecalculate")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Yearly rates and the bonus catalogue
+// ---------------------------------------------------------------------------
+
+type RateKey =
+  | "cnssEmployeeRate"
+  | "cnssEmployerRate"
+  | "workAccidentRate"
+  | "cssRate"
+  | "professionalExpensesRate"
+  | "overtimeRate";
+type AmountKey = "professionalExpensesCap" | "headOfFamilyDeduction" | "childDeduction" | "maxChildren";
+
+const PERCENT_FIELDS: { key: RateKey; label: MessageKey }[] = [
+  { key: "cnssEmployeeRate", label: "payroll.rate.cnssEmployee" },
+  { key: "cnssEmployerRate", label: "payroll.rate.cnssEmployer" },
+  { key: "workAccidentRate", label: "payroll.rate.workAccident" },
+  { key: "cssRate", label: "payroll.rate.css" },
+  { key: "professionalExpensesRate", label: "payroll.rate.professionalExpenses" },
+];
+
+const AMOUNT_FIELDS: { key: AmountKey; label: MessageKey }[] = [
+  { key: "professionalExpensesCap", label: "payroll.rate.professionalExpensesCap" },
+  { key: "headOfFamilyDeduction", label: "payroll.rate.headOfFamily" },
+  { key: "childDeduction", label: "payroll.rate.child" },
+  { key: "maxChildren", label: "payroll.rate.maxChildren" },
+];
+
+const percent = (rate: number) => String(round3(rate * 100));
+
+function RatesPanel({
+  year,
+  initial,
+  close,
+  flash: rawFlash,
+  onSaved,
+}: {
+  year: number;
+  initial: PayrollSettings | null;
+  close: () => void;
+  flash: (message: string) => void;
+  onSaved: () => Promise<void>;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t } = useLanguage();
+  const [rates, setRates] = useState<Record<RateKey | AmountKey, string>>(() => ({
+    cnssEmployeeRate: percent(initial?.cnssEmployeeRate ?? 0),
+    cnssEmployerRate: percent(initial?.cnssEmployerRate ?? 0),
+    workAccidentRate: percent(initial?.workAccidentRate ?? 0),
+    cssRate: percent(initial?.cssRate ?? 0),
+    professionalExpensesRate: percent(initial?.professionalExpensesRate ?? 0.1),
+    overtimeRate: percent(initial?.overtimeRate ?? 1.25),
+    professionalExpensesCap: String(initial?.professionalExpensesCap ?? 2000),
+    headOfFamilyDeduction: String(initial?.headOfFamilyDeduction ?? 0),
+    childDeduction: String(initial?.childDeduction ?? 0),
+    maxChildren: String(initial?.maxChildren ?? 4),
+  }));
+  const [brackets, setBrackets] = useState<{ upTo: string; rate: string }[]>(() =>
+    (initial?.irppBrackets ?? [{ upTo: null, rate: 0 }]).map((bracket) => ({
+      upTo: bracket.upTo == null ? "" : String(bracket.upTo),
+      rate: percent(bracket.rate),
+    })),
+  );
+  const [verified, setVerified] = useState(initial?.verified ?? false);
+  const [saving, setSaving] = useState(false);
+  const [components, setComponents] = useState<PayComponent[]>([]);
+  const [draft, setDraft] = useState({ name: "", kind: "earning" as PayComponent["kind"], subjectToCnss: true, taxable: true });
+
+  const reloadComponents = useCallback(async () => {
+    setComponents(await loadComponents());
+  }, []);
+
+  useEffect(() => {
+    reloadComponents().catch((error: Error) => flash(error.message));
+  }, [reloadComponents, flash]);
+
+  const save = async () => {
+    if (saving) return;
+    const parsed: Partial<Record<RateKey | AmountKey, number>> = {};
+    for (const key of Object.keys(rates) as (RateKey | AmountKey)[]) {
+      const value = amount(rates[key]);
+      if (value == null) return flash(t("payroll.errorNumber"));
+      parsed[key] = value;
+    }
+    const nextBrackets: IrppBracket[] = [];
+    for (const [index, bracket] of brackets.entries()) {
+      const rate = amount(bracket.rate);
+      const last = index === brackets.length - 1;
+      const upTo = last ? null : amount(bracket.upTo);
+      if (rate == null || (!last && !upTo)) return flash(t("payroll.errorBrackets"));
+      if (upTo != null && nextBrackets.length && upTo <= (nextBrackets[nextBrackets.length - 1].upTo ?? 0)) {
+        return flash(t("payroll.errorBrackets"));
+      }
+      nextBrackets.push({ upTo, rate: rate / 100 });
+    }
+    setSaving(true);
+    try {
+      await saveSettings({
+        year,
+        cnssEmployeeRate: parsed.cnssEmployeeRate! / 100,
+        cnssEmployerRate: parsed.cnssEmployerRate! / 100,
+        workAccidentRate: parsed.workAccidentRate! / 100,
+        cssRate: parsed.cssRate! / 100,
+        professionalExpensesRate: parsed.professionalExpensesRate! / 100,
+        overtimeRate: parsed.overtimeRate! / 100,
+        professionalExpensesCap: parsed.professionalExpensesCap!,
+        headOfFamilyDeduction: parsed.headOfFamilyDeduction!,
+        childDeduction: parsed.childDeduction!,
+        maxChildren: Math.round(parsed.maxChildren!),
+        irppBrackets: nextBrackets,
+        verified,
+      });
+      await onSaved();
+      flash(t("payroll.ratesSaved"));
+    } catch (error) {
+      flash((error as Error).message);
+    }
+    setSaving(false);
+  };
+
+  const addComponent = async () => {
+    const name = draft.name.trim();
+    if (!name) return;
+    const code =
+      name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "") || `item_${Date.now()}`;
+    try {
+      const deduction = draft.kind === "deduction";
+      await saveComponent({
+        ...draft,
+        subjectToCnss: !deduction && draft.subjectToCnss,
+        taxable: !deduction && draft.taxable,
+        name,
+        code,
+        active: true,
+      });
+      setDraft({ name: "", kind: "earning", subjectToCnss: true, taxable: true });
+      await reloadComponents();
+    } catch (error) {
+      flash((error as Error).message);
+    }
+  };
+
+  const toggleComponent = async (component: PayComponent) => {
+    try {
+      await saveComponent({ ...component, active: !component.active });
+      await reloadComponents();
+    } catch (error) {
+      flash((error as Error).message);
+    }
+  };
+
+  const setRate = (key: RateKey | AmountKey, value: string) =>
+    setRates((current) => ({ ...current, [key]: value }));
+
+  return (
+    <div className="side-panel rates-panel">
+      <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
+        <X size={18} />
+      </button>
+      <p className="eyebrow">{t("payroll.ratesEyebrow")}</p>
+      <h2>{t("payroll.ratesTitle", { year })}</h2>
+      <p>{t("payroll.ratesNote")}</p>
+
+      <div className="detail-block">
+        <p className="eyebrow">{t("payroll.ratesContributions")}</p>
+        {PERCENT_FIELDS.map((field) => (
+          <Field
+            key={field.key}
+            label={`${t(field.label)} (%)`}
+            type="number"
+            step="0.001"
+            min="0"
+            value={rates[field.key]}
+            onChange={(value) => setRate(field.key, value)}
+          />
+        ))}
+        <Field
+          label={`${t("payroll.rate.overtime")} (%)`}
+          type="number"
+          step="1"
+          min="100"
+          value={rates.overtimeRate}
+          onChange={(value) => setRate("overtimeRate", value)}
+        />
+        {AMOUNT_FIELDS.map((field) => (
+          <Field
+            key={field.key}
+            label={t(field.label)}
+            type="number"
+            step={field.key === "maxChildren" ? "1" : "0.001"}
+            min="0"
+            value={rates[field.key]}
+            onChange={(value) => setRate(field.key, value)}
+          />
+        ))}
+      </div>
+
+      <div className="detail-block">
+        <p className="eyebrow">{t("payroll.ratesBrackets")}</p>
+        <span className="contract-hint">{t("payroll.ratesBracketsNote")}</span>
+        {brackets.map((bracket, index) => {
+          const last = index === brackets.length - 1;
+          return (
+            <div className="bracket-row" key={index}>
+              <label>
+                <span>{t("payroll.upTo")}</span>
+                {last ? (
+                  <input value="∞" readOnly aria-label={t("payroll.upTo")} />
+                ) : (
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={bracket.upTo}
+                    onChange={(event) =>
+                      setBrackets((current) =>
+                        current.map((item, i) => (i === index ? { ...item, upTo: event.target.value } : item)),
+                      )
+                    }
+                  />
+                )}
+              </label>
+              <label>
+                <span>%</span>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="100"
+                  value={bracket.rate}
+                  onChange={(event) =>
+                    setBrackets((current) =>
+                      current.map((item, i) => (i === index ? { ...item, rate: event.target.value } : item)),
+                    )
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("common.delete")}
+                disabled={brackets.length === 1}
+                onClick={() => setBrackets((current) => current.filter((_, i) => i !== index))}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() =>
+            setBrackets((current) => [...current.slice(0, -1), { upTo: "", rate: "" }, ...current.slice(-1)])
+          }
+        >
+          <Plus size={14} /> {t("payroll.addBracket")}
+        </button>
+      </div>
+
+      <div className="detail-block">
+        <label className="form-check rates-verified">
+          <input type="checkbox" checked={verified} onChange={(event) => setVerified(event.target.checked)} />
+          {t("payroll.ratesVerified")}
+        </label>
+        <span className="contract-hint">{t("payroll.ratesVerifiedNote")}</span>
+        <Button onClick={() => void save()}>{saving ? t("modal.saving") : t("payroll.saveRates")}</Button>
+      </div>
+
+      <div className="detail-block">
+        <p className="eyebrow">{t("payroll.catalogTitle")}</p>
+        <div className="pay-item-list">
+          {components.map((component) => (
+            <div className={`pay-item ${component.active ? "" : "is-inactive"}`} key={component.id}>
+              <div>
+                <b>{component.name}</b>
+                <span>
+                  {t(component.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}
+                  {component.kind === "earning" &&
+                    ` · ${component.subjectToCnss ? t("payroll.cnssYes") : t("payroll.cnssNo")} · ${
+                      component.taxable ? t("payroll.taxYes") : t("payroll.taxNo")
+                    }`}
+                </span>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => void toggleComponent(component)}>
+                {component.active ? t("payroll.disable") : t("payroll.enable")}
+              </button>
+            </div>
+          ))}
+        </div>
+        <Field
+          label={t("payroll.newComponent")}
+          value={draft.name}
+          onChange={(value) => setDraft((current) => ({ ...current, name: value }))}
+        />
+        <label className="form-label">
+          {t("payroll.componentKind")}
+          <select
+            value={draft.kind}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, kind: event.target.value as PayComponent["kind"] }))
+            }
+          >
+            <option value="earning">{t("payroll.kindEarning")}</option>
+            <option value="deduction">{t("payroll.kindDeduction")}</option>
+          </select>
+        </label>
+        {draft.kind === "earning" && (
+          <>
+            <label className="form-check">
+              <input
+                type="checkbox"
+                checked={draft.subjectToCnss}
+                onChange={(event) => setDraft((current) => ({ ...current, subjectToCnss: event.target.checked }))}
+              />
+              {t("payroll.cnssYes")}
+            </label>
+            <label className="form-check">
+              <input
+                type="checkbox"
+                checked={draft.taxable}
+                onChange={(event) => setDraft((current) => ({ ...current, taxable: event.target.checked }))}
+              />
+              {t("payroll.taxYes")}
+            </label>
+          </>
+        )}
+        <button type="button" className="secondary-button" onClick={() => void addComponent()}>
+          <Plus size={14} /> {t("payroll.addComponent")}
+        </button>
+      </div>
     </div>
   );
 }

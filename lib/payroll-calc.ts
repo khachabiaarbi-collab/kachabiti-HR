@@ -45,6 +45,8 @@ export type PayVariables = {
   workedHours: number;
   /** Working days of unpaid leave in the month. */
   unpaidDays: number;
+  /** Working days before the hire date or after the contract end. */
+  outsideContractDays: number;
   /** Unjustified absence hours to deduct. */
   absenceHours: number;
   /** Overtime hours paid at the overtime rate. */
@@ -86,6 +88,7 @@ export type PayResult = {
 export const PAY_LABELS = {
   base: "Salaire de base",
   unpaid: "Retenue congé sans solde",
+  outside: "Prorata entrée / sortie",
   absence: "Retenue absences",
   overtime: "Heures supplémentaires",
   cnss: "Cotisation CNSS",
@@ -175,6 +178,22 @@ export function calculatePayslip(
   if (contract.payBasis === "monthly") {
     // Absences cannot take the base below zero.
     let remaining = round3(baseAmount);
+    const outside = Math.min(
+      remaining,
+      round3(
+        hourly * dailyHours(contract.weeklyHours) * Math.max(0, variables.outsideContractDays),
+      ),
+    );
+    if (outside > 0) {
+      remaining = round3(remaining - outside);
+      lines.push(
+        line("outside", PAY_LABELS.outside, "earning", -outside, {
+          base: variables.outsideContractDays,
+          subjectToCnss: true,
+          taxable: true,
+        }),
+      );
+    }
     const unpaid = Math.min(
       remaining,
       round3(hourly * dailyHours(contract.weeklyHours) * Math.max(0, variables.unpaidDays)),

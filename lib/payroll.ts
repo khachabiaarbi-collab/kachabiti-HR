@@ -96,7 +96,10 @@ export function formatTnd(amount: number, locale: string) {
     currency: "TND",
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(amount);
+  })
+    .format(amount)
+    // fr-FR groups with a narrow space that disappears in large, tight type.
+    .replace(/\u202f/g, "\u00a0");
 }
 
 export function isMissingPayrollTable(message: string | undefined) {

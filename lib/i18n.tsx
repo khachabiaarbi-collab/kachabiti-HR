@@ -132,6 +132,7 @@ export function screenLabel(t: Translate, label: string) {
     People: "nav.people",
     Departments: "nav.departments",
     Analytics: "nav.analytics",
+    Payroll: "nav.payroll",
     Settings: "nav.settings",
   };
   const key = labels[label];

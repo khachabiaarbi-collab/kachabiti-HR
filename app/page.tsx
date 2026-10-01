@@ -231,6 +231,7 @@ const ADMIN_VIEWS: Record<string, string> = {
   people: "People",
   departments: "Departments",
   analytics: "Analytics",
+  payroll: "Payroll",
   settings: "Settings",
 };
 
@@ -517,6 +518,7 @@ export default function Page() {
           requests={requests}
           mobileOpen={mobileNavOpen}
           onCloseMobile={() => setMobileNavOpen(false)}
+          showPayroll={role === "Admin"}
         />
       )}
       <main className="main-content">
@@ -626,6 +628,7 @@ export default function Page() {
               noticeFocus={noticeFocus}
               onNoticeFocusHandled={() => setNoticeFocus(null)}
               reload={reload}
+              canManagePayroll={role === "Admin"}
             />
           )}
         </div>

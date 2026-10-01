@@ -12,6 +12,7 @@ import {
   LogOut,
   Search,
   UserRound,
+  Wallet,
   Settings,
   ShieldCheck,
   Users,
@@ -43,6 +44,7 @@ const adminNav = [
   { label: "People", icon: Users },
   { label: "Departments", icon: Building2 },
   { label: "Analytics", icon: Activity },
+  { label: "Payroll", icon: Wallet, adminOnly: true },
 ];
 
 const employeeNav = [
@@ -87,6 +89,7 @@ export function Sidebar({
   requests = [],
   mobileOpen = false,
   onCloseMobile,
+  showPayroll = false,
 }: {
   active: string;
   setActive: (label: string) => void;
@@ -95,6 +98,7 @@ export function Sidebar({
   requests?: LeaveRequest[];
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
+  showPayroll?: boolean;
 }) {
   const t = useLanguage().t;
   const go = (label: string) => {
@@ -151,7 +155,7 @@ export function Sidebar({
       </div>
       <nav className="nav-list">
         <p className="nav-label">{t("nav.manage")}</p>
-        {adminNav.map((item) => {
+        {adminNav.filter((item) => showPayroll || !item.adminOnly).map((item) => {
           const Icon = item.icon;
           return (
             <button
