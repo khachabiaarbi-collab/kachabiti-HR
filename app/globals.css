@@ -3987,3 +3987,52 @@ button.attendance-report-row:hover {
     animation: none;
   }
 }
+
+/* Payroll: contract block in the employee panel */
+.contract-block .contract-subhead {
+  margin-top: 18px;
+}
+.contract-hint {
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.contract-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contract-history button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: #4b5563;
+  font-size: 12px;
+}
+.contract-history button b {
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+.contract-history button.active {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+}
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+}
+.form-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #1f3a8a;
+}

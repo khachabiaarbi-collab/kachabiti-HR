@@ -10,6 +10,7 @@ import type {
   LeaveRequest,
   LeaveType,
 } from "@/lib/app-types";
+import { ContractSection } from "@/components/payroll-views";
 import { Avatar, Button, Field, Status } from "@/components/primitives";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
@@ -848,6 +849,7 @@ export function EmployeeDetail({
   departments,
   leaveTypes,
   balances = [],
+  canManagePayroll = false,
   close,
   flash,
   onSaved,
@@ -856,6 +858,7 @@ export function EmployeeDetail({
   departments: Department[];
   leaveTypes: LeaveType[];
   balances?: LeaveBalance[];
+  canManagePayroll?: boolean;
   close: () => void;
   flash: (message: string) => void;
   onSaved: (employee: Employee, balances: LeaveBalance[]) => void;
@@ -1123,6 +1126,9 @@ export function EmployeeDetail({
         <Button onClick={() => void save()}>
           {saving ? t("modal.saving") : t("panel.saveChanges")}
         </Button>
+        {canManagePayroll && (
+          <ContractSection employeeId={employee.id} flash={flash} />
+        )}
       </div>
     </div>
   );

@@ -707,6 +707,7 @@ export default function Page() {
           departments={departments}
           leaveTypes={leaveTypes}
           balances={balances}
+          canManagePayroll={role === "Admin"}
           close={() => setSelected(null)}
           flash={flash}
           onSaved={(employee, nextSolde) => {
