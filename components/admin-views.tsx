@@ -431,7 +431,7 @@ export function AdminView({
   canManagePayroll?: boolean;
 }) {
   if (active === "Payroll" && canManagePayroll) {
-    return <PayrollView employees={employees} flash={flash} />;
+    return <PayrollView employees={employees} flash={flash} onOpenEmployee={setSelected} />;
   }
   if (active === "People") {
     return (

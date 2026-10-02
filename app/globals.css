@@ -4654,3 +4654,32 @@ button.attendance-report-row:hover {
   font-size: 11px;
   line-height: 1.4;
 }
+.payroll-missing p + .payroll-missing-names,
+.payroll-missing-names + .payroll-missing-hint {
+  margin-top: 8px;
+}
+.payroll-missing-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.payroll-missing-names button,
+.payroll-missing-names span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 600;
+}
+.payroll-missing-names button:hover {
+  border-color: #fb923c;
+  background: #fff7ed;
+}
+.payroll-missing-hint {
+  color: #b45309;
+}

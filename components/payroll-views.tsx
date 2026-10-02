@@ -248,7 +248,7 @@ export function ContractSection({
 
   if (state === "loading") {
     return (
-      <div className="detail-block">
+      <div className="detail-block" id="employee-contract">
         <p className="eyebrow">{t("contract.title")}</p>
         <span>{t("contract.loading")}</span>
       </div>
@@ -257,7 +257,7 @@ export function ContractSection({
 
   if (state === "missing") {
     return (
-      <div className="detail-block">
+      <div className="detail-block" id="employee-contract">
         <p className="eyebrow">{t("contract.title")}</p>
         <span>{t("contract.missingTable")}</span>
       </div>
@@ -267,7 +267,7 @@ export function ContractSection({
   const isNewVersion = !contracts.some((item) => item.effectiveFrom === form.effectiveFrom);
 
   return (
-    <div className="detail-block contract-block">
+    <div className="detail-block contract-block" id="employee-contract">
       <p className="eyebrow">{t("contract.title")}</p>
       <p className="page-subtitle">{t("contract.note")}</p>
 
@@ -590,9 +590,12 @@ const STATUS_KEYS: Record<PayrollRun["status"], MessageKey> = {
 export function PayrollView({
   employees,
   flash: rawFlash,
+  onOpenEmployee,
 }: {
   employees: Employee[];
   flash: (message: string) => void;
+  /** Opens the employee panel (where the contract is edited). */
+  onOpenEmployee?: (employee: Employee) => void;
 }) {
   const flash = useStableFlash(rawFlash);
   const { t, dateLocale } = useLanguage();
@@ -839,12 +842,36 @@ export function PayrollView({
             </div>
 
             {notIncluded.length > 0 && (
-              <p className="payroll-missing">
+              <div className="payroll-missing">
                 <AlertTriangle size={14} />
-                {t("payroll.notIncluded", {
-                  names: notIncluded.map((employee) => employee.name).join(", "),
-                })}
-              </p>
+                <div>
+                  <p>{t("payroll.notIncludedTitle")}</p>
+                  <div className="payroll-missing-names">
+                    {notIncluded.map((employee) =>
+                      onOpenEmployee ? (
+                        <button
+                          type="button"
+                          key={employee.id}
+                          onClick={() => {
+                            onOpenEmployee(employee);
+                            // The contract block sits at the bottom of the panel.
+                            window.setTimeout(() => {
+                              document
+                                .getElementById("employee-contract")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }, 400);
+                          }}
+                        >
+                          <Plus size={12} /> {employee.name}
+                        </button>
+                      ) : (
+                        <span key={employee.id}>{employee.name}</span>
+                      ),
+                    )}
+                  </div>
+                  <p className="payroll-missing-hint">{t("payroll.notIncludedHint")}</p>
+                </div>
+              </div>
             )}
 
             {sorted.length === 0 ? (
