@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Check, ChevronRight, Clock3 } from "lucide-react";
+import { Check, ChevronRight, Loader2, Menu } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminView } from "@/components/admin-views";
-import { EmployeeNav, Sidebar, TopActions } from "@/components/app-chrome";
+import { EmployeeNav, EmployeeTabBar, Sidebar, TopActions } from "@/components/app-chrome";
 import { AuthScreen } from "@/components/auth-screen";
 import { EmployeeView } from "@/components/employee-views";
 import {
@@ -69,7 +69,7 @@ async function loadNotices(
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (!error) {
-      return ((data ?? []) as NotificationRow[]).map(mapNotice);
+      return ((data ?? []) as unknown as NotificationRow[]).map(mapNotice);
     }
   }
   return [];
@@ -231,6 +231,7 @@ const ADMIN_VIEWS: Record<string, string> = {
   people: "People",
   departments: "Departments",
   analytics: "Analytics",
+  payroll: "Payroll",
   settings: "Settings",
 };
 
@@ -283,6 +284,8 @@ export default function Page() {
   const [showNotices, setShowNotices] = useState(false);
   const [noticeFocus, setNoticeFocus] = useState<NoticeFocus | null>(null);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const setActive = (label: string) => {
     setActiveState(label);
@@ -339,8 +342,9 @@ export default function Page() {
 
     const load = async () => {
       const data = await loadWorkspace();
-      if (cancelled || !data) return;
-      applyWorkspace(data);
+      if (cancelled) return;
+      if (data) applyWorkspace(data);
+      setWorkspaceLoaded(true);
     };
 
     void load();
@@ -439,6 +443,14 @@ export default function Page() {
   const role: Role = toUiRole(currentEmployee?.role, isEmployee ? "Employee" : "Admin");
 
   const openNotice = async (item: Notice) => {
+    if (/^Your payslip for /.test(item.text)) {
+      setShowNotices(false);
+      setActive("My profile");
+      window.setTimeout(() => {
+        document.getElementById("payslips")?.scrollIntoView({ behavior: "smooth" });
+      }, 300);
+      return;
+    }
     const attendance =
       Boolean(item.attendanceCorrectionId) ||
       /attendance correction/i.test(item.text);
@@ -512,11 +524,24 @@ export default function Page() {
           logout={logout}
           currentEmployee={currentEmployee}
           requests={requests}
+          mobileOpen={mobileNavOpen}
+          onCloseMobile={() => setMobileNavOpen(false)}
+          showPayroll={role === "Admin"}
         />
       )}
       <main className="main-content">
         {!isEmployee && (
           <header className="topbar">
+            <button
+              type="button"
+              className="icon-button topbar-menu"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label={t("chrome.openMenu")}
+              aria-expanded={mobileNavOpen}
+              aria-controls="admin-sidebar"
+            >
+              <Menu size={20} />
+            </button>
             <div className="breadcrumb">
               <span className="breadcrumb-muted">
                 {t("chrome.workspaceBreadcrumb", {
@@ -547,14 +572,6 @@ export default function Page() {
         {isEmployee && (
           <header className="employee-mobile-top">
             <Logo />
-            <button
-              type="button"
-              className={`mobile-clock-link ${active === "Time clock" ? "active" : ""}`}
-              onClick={() => setActive("Time clock")}
-            >
-              <Clock3 size={16} />
-              {t("nav.timeClock")}
-            </button>
             <TopActions
               role={role}
               logout={logout}
@@ -574,7 +591,12 @@ export default function Page() {
           </header>
         )}
         <div className="page-wrap">
-          {isEmployee ? (
+          {!workspaceLoaded ? (
+            <div className="workspace-loading" role="status" aria-live="polite">
+              <Loader2 size={22} className="workspace-loading-icon" />
+              <span>{t("chrome.loading")}</span>
+            </div>
+          ) : isEmployee ? (
             <EmployeeView
               active={active}
               setActive={setActive}
@@ -614,10 +636,12 @@ export default function Page() {
               noticeFocus={noticeFocus}
               onNoticeFocusHandled={() => setNoticeFocus(null)}
               reload={reload}
+              canManagePayroll={role === "Admin"}
             />
           )}
         </div>
       </main>
+      {isEmployee && <EmployeeTabBar active={active} setActive={setActive} />}
       {notice && (
         <div className="toast">
           <Check size={17} />
@@ -694,6 +718,7 @@ export default function Page() {
           departments={departments}
           leaveTypes={leaveTypes}
           balances={balances}
+          canManagePayroll={role === "Admin"}
           close={() => setSelected(null)}
           flash={flash}
           onSaved={(employee, nextSolde) => {

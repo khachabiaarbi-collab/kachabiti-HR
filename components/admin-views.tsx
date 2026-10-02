@@ -44,6 +44,7 @@ import {
   paginate,
   pageForId,
 } from "@/components/primitives";
+import { PayrollView } from "@/components/payroll-views";
 import {
   AuthorizationDetail,
   ConfirmModal,
@@ -403,6 +404,7 @@ export function AdminView({
   noticeFocus = null,
   onNoticeFocusHandled,
   reload,
+  canManagePayroll = false,
 }: {
   active: string;
   setActive: (label: string) => void;
@@ -426,7 +428,11 @@ export function AdminView({
   noticeFocus?: NoticeFocus | null;
   onNoticeFocusHandled?: () => void;
   reload: () => Promise<void>;
+  canManagePayroll?: boolean;
 }) {
+  if (active === "Payroll" && canManagePayroll) {
+    return <PayrollView employees={employees} flash={flash} onOpenEmployee={setSelected} />;
+  }
   if (active === "People") {
     return (
       <People

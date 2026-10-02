@@ -132,6 +132,7 @@ export function screenLabel(t: Translate, label: string) {
     People: "nav.people",
     Departments: "nav.departments",
     Analytics: "nav.analytics",
+    Payroll: "nav.payroll",
     Settings: "nav.settings",
   };
   const key = labels[label];
@@ -185,6 +186,10 @@ export function translateNotice(
         ? t("status.rejected").toLowerCase()
         : t("status.pending").toLowerCase();
 
+  const payslip = text.match(/^Your payslip for (\d{4})-(\d{2}) is available\.$/);
+  if (payslip) {
+    return t("notice.payslipAvailable", { month: `${payslip[2]}/${payslip[1]}` });
+  }
   const leaveSelf = text.match(
     /^Your leave request \((.+)\) was submitted for approval\.$/,
   );
