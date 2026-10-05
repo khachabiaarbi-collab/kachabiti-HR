@@ -225,7 +225,8 @@ export function ContractSection({
           base_salary: baseSalary ?? 0,
           hourly_rate: hourlyRate,
           weekly_hours: weeklyHours,
-          cnss_number: form.cnssNumber.trim() || null,
+          // SIVP is not affiliated to CNSS through this payroll.
+          cnss_number: isExemptContract(form.contractType) ? null : form.cnssNumber.trim() || null,
           marital_status: form.maritalStatus,
           head_of_family: form.headOfFamily,
           dependent_children: children,
@@ -377,12 +378,16 @@ export function ContractSection({
         value={form.weeklyHours}
         onChange={(value) => set("weeklyHours", value)}
       />
-      <Field
-        label={t("contract.cnssNumber")}
-        name="cnss_number"
-        value={form.cnssNumber}
-        onChange={(value) => set("cnssNumber", value)}
-      />
+      {isExemptContract(form.contractType) ? (
+        <span className="contract-hint">{t("contract.cnssNotApplicable")}</span>
+      ) : (
+        <Field
+          label={t("contract.cnssNumber")}
+          name="cnss_number"
+          value={form.cnssNumber}
+          onChange={(value) => set("cnssNumber", value)}
+        />
+      )}
 
       <p className="eyebrow contract-subhead">{t("contract.family")}</p>
       <label className="form-label">
@@ -1891,7 +1896,14 @@ function PayslipSheet({ payslip, company }: { payslip: Payslip; company: Payroll
           </dl>
           <dl>
             <div><dt>Contrat</dt><dd>{FR_CONTRACT[inputs.contract.contractType] ?? "—"}</dd></div>
-            <div><dt>N° CNSS</dt><dd>{inputs.contract.cnssNumber ?? "—"}</dd></div>
+            <div>
+              <dt>N° CNSS</dt>
+              <dd>
+                {isExemptContract(inputs.contract.contractType)
+                  ? "Non applicable (SIVP)"
+                  : inputs.contract.cnssNumber ?? "—"}
+              </dd>
+            </div>
             <div><dt>Situation familiale</dt><dd>{family || "—"}</dd></div>
             <div>
               <dt>Banque / RIB</dt>

@@ -11,6 +11,7 @@ import {
 } from "@/lib/payroll";
 import {
   calculatePayslip,
+  isExemptContract,
   round3,
   summarizeAttendance,
   workingDaysInRange,
@@ -484,7 +485,9 @@ export function effectiveVariables(inputs: PayslipInputs): PayVariables {
 function payslipWarnings(inputs: PayslipInputs, net: number, verified: boolean, to: string) {
   const warnings: PayslipWarning[] = [];
   if (!verified) warnings.push("rates_unverified");
-  if (!inputs.contract.cnssNumber) warnings.push("no_cnss_number");
+  if (!inputs.contract.cnssNumber && !isExemptContract(inputs.contract.contractType)) {
+    warnings.push("no_cnss_number");
+  }
   if (!inputs.contract.rib) warnings.push("no_rib");
   if (inputs.contract.payBasis === "hourly" && effectiveVariables(inputs).workedHours <= 0) {
     warnings.push("hourly_no_hours");
