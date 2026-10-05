@@ -657,8 +657,9 @@ export async function prepareRun(
       return { ...row, unpaid };
     });
   const unpaidLeave = approvedLeave.filter((row) => row.unpaid);
-  // A month in progress is counted up to yesterday: today may not be punched yet.
-  const countedUntil = todayInTunis() <= to ? previousDay(todayInTunis()) : to;
+  // A month in progress is paid up to today; the rest of it is not paid yet.
+  const today = todayInTunis() <= to ? todayInTunis() : null;
+  const countedUntil = today ?? to;
 
   const missingContract: Employee[] = [];
   const included = new Set<string>();
@@ -713,6 +714,7 @@ export async function prepareRun(
           holidays: holidaySet,
           leave,
           graceMinutes: grace,
+          today,
         });
       } else {
         summary = undefined;
@@ -739,6 +741,23 @@ export async function prepareRun(
         outsideContractDays: useClock ? summary!.outsideContractDays : outsideContractDays,
         absentDays: useClock ? summary!.absentDays : 0,
         absenceHours: useClock ? summary!.missingHours : 0,
+        // Month in progress: pay only the hours earned up to today.
+        earnedHours:
+          !today || contract.payBasis !== "monthly"
+            ? null
+            : useClock
+              ? summary!.earnedHours
+              : round3(
+                  workingDaysInRange(
+                    employedFrom > from ? employedFrom : from,
+                    today,
+                    from,
+                    to,
+                    sixDayWeek,
+                    holidaySet,
+                  ) *
+                    (contract.weeklyHours / (sixDayWeek ? 6 : 5)),
+                ),
         overtimeHours: 0,
       },
       attendance: summary,

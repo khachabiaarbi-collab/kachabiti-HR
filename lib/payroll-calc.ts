@@ -60,6 +60,12 @@ export type PayVariables = {
   absentDays: number;
   /** Unjustified absence hours to deduct. */
   absenceHours: number;
+  /**
+   * Month in progress only: hours earned so far (punched, authorized, holidays,
+   * paid leave). The base is then paid for these hours and the rest of the
+   * month is not paid yet. Leave unset for a finished month.
+   */
+  earnedHours?: number | null;
   /** Overtime hours paid at the overtime rate. */
   overtimeHours: number;
 };
@@ -101,6 +107,7 @@ export const PAY_LABELS = {
   unpaid: "Retenue congé sans solde",
   outside: "Prorata entrée / sortie",
   absentDays: "Retenue absences non justifiées",
+  remaining: "Période du mois non encore travaillée",
   absence: "Retenue absences",
   overtime: "Heures supplémentaires",
   cnss: "Cotisation CNSS",
@@ -239,6 +246,7 @@ export function calculatePayslip(
     }
     const absence = Math.min(remaining, round3(hourly * v(variables.absenceHours)));
     if (absence > 0) {
+      remaining = round3(remaining - absence);
       lines.push(
         line("absence", PAY_LABELS.absence, "earning", -absence, {
           base: variables.absenceHours,
@@ -246,6 +254,19 @@ export function calculatePayslip(
           taxable: true,
         }),
       );
+    }
+    // A month in progress pays only the hours earned up to today.
+    if (variables.earnedHours != null) {
+      const earned = round3(hourly * v(variables.earnedHours));
+      const notYet = Math.max(0, round3(remaining - earned));
+      if (notYet > 0) {
+        lines.push(
+          line("remaining", PAY_LABELS.remaining, "earning", -notYet, {
+            subjectToCnss: true,
+            taxable: true,
+          }),
+        );
+      }
     }
   }
 
@@ -490,6 +511,8 @@ export type AttendanceSummary = {
   absentDays: number;
   missingHours: number;
   workedHours: number;
+  /** Hours that count as paid so far: punched (capped at the schedule), authorized, holidays, paid leave. */
+  earnedHours: number;
 };
 
 /**
@@ -509,6 +532,8 @@ export function summarizeAttendance(
     /** Approved leave by date: true when unpaid. */
     leave: ReadonlyMap<string, boolean>;
     graceMinutes: number;
+    /** Set while the month is in progress: today's date. */
+    today?: string | null;
   },
 ): AttendanceSummary {
   const summary: AttendanceSummary = {
@@ -522,19 +547,27 @@ export function summarizeAttendance(
     absentDays: 0,
     missingHours: 0,
     workedHours: 0,
+    earnedHours: 0,
   };
   let missingMinutes = 0;
   let workedMinutes = 0;
+  let earnedMinutes = 0;
+  const today = options.today ?? null;
 
   for (const day of days) {
     if (day.date > options.countedUntil) continue;
     const employed =
       (!options.employedFrom || day.date >= options.employedFrom) &&
       (!options.employedTo || day.date <= options.employedTo);
-    if (employed) workedMinutes += Math.max(0, day.workedMinutes);
+    const future = today !== null && day.date > today;
+    if (employed && !future) workedMinutes += Math.max(0, day.workedMinutes);
     if (day.scheduledMinutes <= 0) continue;
+    if (future) continue;
     if (options.holidays.has(day.date)) {
-      if (employed) summary.holidayDays += 1;
+      if (employed) {
+        summary.holidayDays += 1;
+        earnedMinutes += day.scheduledMinutes;
+      }
       continue;
     }
     if (!employed) {
@@ -545,7 +578,19 @@ export function summarizeAttendance(
     const leave = options.leave.get(day.date);
     if (leave !== undefined) {
       if (leave) summary.unpaidDays += 1;
-      else summary.paidLeaveDays += 1;
+      else {
+        summary.paidLeaveDays += 1;
+        earnedMinutes += day.scheduledMinutes;
+      }
+      continue;
+    }
+    earnedMinutes += Math.min(
+      day.scheduledMinutes,
+      Math.max(0, day.workedMinutes) + Math.max(0, day.authorizedMinutes),
+    );
+    if (today !== null && day.date === today) {
+      // Today is not over: time not worked yet is not an absence.
+      if (day.workedMinutes > 0) summary.workedDays += 1;
       continue;
     }
     if (day.workedMinutes <= 0 && day.authorizedMinutes <= 0) {
@@ -559,5 +604,6 @@ export function summarizeAttendance(
 
   summary.missingHours = round3(missingMinutes / 60);
   summary.workedHours = round3(workedMinutes / 60);
+  summary.earnedHours = round3(earnedMinutes / 60);
   return summary;
 }

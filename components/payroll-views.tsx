@@ -1121,6 +1121,7 @@ const VARIABLE_FIELDS: { key: keyof PayVariables; label: MessageKey; hourlyOnly?
   { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true },
   { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true },
   { key: "absentDays", label: "payroll.var.absentDays", monthlyOnly: true },
+  { key: "earnedHours", label: "payroll.var.earnedHours", monthlyOnly: true },
   { key: "absenceHours", label: "payroll.var.absenceHours", monthlyOnly: true },
   { key: "overtimeHours", label: "payroll.var.overtimeHours" },
 ];
@@ -1193,6 +1194,7 @@ function PayslipPanel({
       unpaidDays: String(current.unpaidDays),
       outsideContractDays: String(current.outsideContractDays ?? 0),
       absentDays: String(current.absentDays ?? 0),
+      earnedHours: current.earnedHours == null ? "" : String(current.earnedHours),
       absenceHours: String(current.absenceHours),
       overtimeHours: String(current.overtimeHours),
     };
@@ -1211,8 +1213,11 @@ function PayslipPanel({
       .catch((error: Error) => flash(error.message));
   }, [editable, flash]);
 
-  const fields = VARIABLE_FIELDS.filter((field) =>
-    inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly,
+  const fields = VARIABLE_FIELDS.filter(
+    (field) =>
+      (inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly) &&
+      // Hours earned so far only apply while the month is in progress.
+      (field.key !== "earnedHours" || inputs.auto.earnedHours != null),
   );
 
   const addOneOff = () => {
@@ -1282,6 +1287,12 @@ function PayslipPanel({
             <div><dt>{t("payroll.attHolidays")}</dt><dd>{inputs.attendance.holidayDays}</dd></div>
             <div><dt>{t("payroll.attOutside")}</dt><dd>{inputs.attendance.outsideContractDays}</dd></div>
             <div><dt>{t("payroll.attHours")}</dt><dd>{inputs.attendance.workedHours.toLocaleString(dateLocale)} h</dd></div>
+            {inputs.auto.earnedHours != null && (
+              <div>
+                <dt>{t("payroll.attEarned")}</dt>
+                <dd>{(inputs.attendance.earnedHours ?? 0).toLocaleString(dateLocale)} h</dd>
+              </div>
+            )}
           </dl>
         </div>
       )}

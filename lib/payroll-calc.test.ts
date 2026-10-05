@@ -269,3 +269,72 @@ test("attendance: a hire on the 3rd makes the 1st and 2nd outside the contract",
   assert.equal(summary.absentDays, 0);
   assert.equal(summary.workedDays, 1);
 });
+
+const octoberSchedule = (worked: Record<string, number>) =>
+  Array.from({ length: 31 }, (_, index) => {
+    const date = `2026-10-${String(index + 1).padStart(2, "0")}`;
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const scheduled = weekday === 0 ? 0 : weekday === 6 ? 300 : 480;
+    return day(date, scheduled, worked[date] ?? 0);
+  });
+
+test("month in progress: Takwa (SIVP, from 3 Oct) is paid only the 9 hours worked so far", () => {
+  const summary = summarizeAttendance(octoberSchedule({ "2026-10-03": 300, "2026-10-05": 240 }), {
+    countedUntil: "2026-10-05",
+    employedFrom: "2026-10-03",
+    employedTo: "2027-07-28",
+    holidays: new Set(),
+    leave: new Map(),
+    graceMinutes: 5,
+    today: "2026-10-05",
+  });
+  assert.equal(summary.outsideContractDays, 2); // 1st and 2nd
+  assert.equal(summary.absentDays, 0); // today is not over, the rest is in the future
+  assert.equal(summary.earnedHours, 9);
+
+  const result = calculatePayslip(
+    { ...monthly(800), contractType: "sivp" },
+    rates2026,
+    {
+      ...noVariables,
+      outsideContractDays: summary.outsideContractDays,
+      absentDays: summary.absentDays,
+      absenceHours: summary.missingHours,
+      earnedHours: summary.earnedHours,
+    },
+  );
+  assert.equal(result.gross, 34.615); // 800 / 208 h × 9 h
+  assert.equal(result.cnssEmployee, 0);
+  assert.equal(result.irpp, 0);
+  assert.equal(result.net, 34.615);
+  assert.ok(result.lines.some((line) => line.code === "remaining"));
+});
+
+test("month in progress: a past day without punch is absent, future days are not", () => {
+  const summary = summarizeAttendance(
+    octoberSchedule({ "2026-10-01": 480, "2026-10-05": 480 }),
+    {
+      countedUntil: "2026-10-06",
+      employedFrom: null,
+      employedTo: null,
+      holidays: new Set(),
+      leave: new Map(),
+      graceMinutes: 5,
+      today: "2026-10-06",
+    },
+  );
+  // 2nd (Fri) and 3rd (Sat) absent; 6th is today with nothing yet; 7th onwards future.
+  assert.equal(summary.absentDays, 2);
+  assert.equal(summary.earnedHours, 16);
+  const result = calculatePayslip(monthly(1500), rates2026, {
+    ...noVariables,
+    absentDays: summary.absentDays,
+    earnedHours: summary.earnedHours,
+  });
+  assert.equal(result.gross, round3((1500 / 208) * 16));
+});
+
+test("a finished month ignores earned hours", () => {
+  const result = calculatePayslip(monthly(1500), rates2026, { ...noVariables, earnedHours: null });
+  assert.equal(result.gross, 1500);
+});
