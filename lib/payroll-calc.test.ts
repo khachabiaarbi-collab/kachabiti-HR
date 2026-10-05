@@ -8,6 +8,7 @@ import {
   calculatePayslip,
   progressiveTax,
   round3,
+  summarizeAttendance,
   workingDaysInRange,
   type PayContract,
   type PayrollRates,
@@ -47,7 +48,7 @@ const monthly = (baseSalary: number, extra: Partial<PayContract> = {}): PayContr
   ...extra,
 });
 
-const noVariables: PayVariables = { workedHours: 0, unpaidDays: 0, outsideContractDays: 0, absenceHours: 0, overtimeHours: 0 };
+const noVariables: PayVariables = { workedHours: 0, unpaidDays: 0, outsideContractDays: 0, absentDays: 0, absenceHours: 0, overtimeHours: 0 };
 
 test("1500 TND, single, no extras", () => {
   const result = calculatePayslip(monthly(1500), rates2026, noVariables);
@@ -90,7 +91,7 @@ test("unpaid day, overtime, bonus and advance", () => {
   const result = calculatePayslip(
     monthly(1850),
     rates2026,
-    { workedHours: 0, unpaidDays: 1, outsideContractDays: 0, absenceHours: 0, overtimeHours: 10 },
+    { workedHours: 0, unpaidDays: 1, outsideContractDays: 0, absentDays: 0, absenceHours: 0, overtimeHours: 10 },
     [
       { code: "transport", label: "Prime de transport", kind: "earning", amount: 80, subjectToCnss: true, taxable: true },
       { code: "advance", label: "Avance sur salaire", kind: "deduction", amount: 200, subjectToCnss: false, taxable: false },
@@ -128,7 +129,7 @@ test("absences never push the base below zero", () => {
   const result = calculatePayslip(
     monthly(1000),
     rates2026,
-    { workedHours: 0, unpaidDays: 40, outsideContractDays: 5, absenceHours: 50, overtimeHours: 0 },
+    { workedHours: 0, unpaidDays: 40, outsideContractDays: 5, absentDays: 3, absenceHours: 50, overtimeHours: 0 },
   );
   assert.equal(result.gross, 0);
   assert.equal(result.net, 0);
@@ -146,7 +147,7 @@ test("hourly contract pays worked hours", () => {
   const result = calculatePayslip(
     { ...monthly(0), payBasis: "hourly", hourlyRate: 7.5 },
     rates2026,
-    { workedHours: 160, unpaidDays: 3, outsideContractDays: 2, absenceHours: 0, overtimeHours: 0 },
+    { workedHours: 160, unpaidDays: 3, outsideContractDays: 2, absentDays: 4, absenceHours: 0, overtimeHours: 0 },
   );
   assert.equal(result.gross, 1200);
   assert.ok(!result.lines.some((line) => line.code === "unpaid"));
@@ -175,4 +176,96 @@ test("amount in French words", () => {
   assert.equal(amountInFrenchWords(71.1), "soixante et onze dinars et cent millimes");
   assert.equal(amountInFrenchWords(200000), "deux cent mille dinars");
   assert.equal(amountInFrenchWords(1), "un dinar");
+});
+
+test("SIVP pays no CNSS, IRPP, CSS or employer charges", () => {
+  const result = calculatePayslip({ ...monthly(800), contractType: "sivp" }, rates2026, noVariables);
+  assert.equal(result.gross, 800);
+  assert.equal(result.cnssEmployee, 0);
+  assert.equal(result.irpp, 0);
+  assert.equal(result.css, 0);
+  assert.equal(result.employerCnss, 0);
+  assert.equal(result.net, 800);
+  assert.equal(result.employerCost, 800);
+  assert.deepEqual(
+    result.lines.map((line) => line.code),
+    ["base"],
+  );
+});
+
+test("a CDI at the same salary still pays contributions", () => {
+  const result = calculatePayslip({ ...monthly(800), contractType: "cdi" }, rates2026, noVariables);
+  assert.equal(result.cnssEmployee, 73.44);
+});
+
+test("absent days are deducted like unpaid days", () => {
+  const result = calculatePayslip(monthly(1500), rates2026, { ...noVariables, absentDays: 2 });
+  const line = result.lines.find((item) => item.code === "absent_days");
+  assert.equal(line?.amount, -115.385);
+  assert.equal(result.gross, 1384.615);
+});
+
+test("payslips saved before absentDays existed still calculate", () => {
+  const { absentDays: _omit, ...old } = noVariables;
+  const result = calculatePayslip(monthly(1500), rates2026, old as typeof noVariables);
+  assert.equal(result.net, 1195.486);
+});
+
+const day = (date: string, scheduled: number, worked: number, authorized = 0) => ({
+  date,
+  scheduledMinutes: scheduled,
+  workedMinutes: worked,
+  authorizedMinutes: authorized,
+});
+
+test("attendance: absent days, short days, leave, holidays, contract window", () => {
+  const days = [
+    day("2026-09-01", 480, 540), // full day (lunch inside the session)
+    day("2026-09-02", 480, 240), // half day: 4h missing
+    day("2026-09-03", 480, 0, 60), // authorization only: 7h missing
+    day("2026-09-04", 480, 0), // absent
+    day("2026-09-05", 300, 0), // Saturday: unpaid leave
+    day("2026-09-06", 0, 0), // Sunday: not scheduled
+    day("2026-09-07", 480, 0), // paid leave
+    day("2026-09-08", 480, 0), // public holiday
+    day("2026-09-09", 480, 470), // 10 min short, within grace
+    day("2026-09-10", 480, 0), // after contract end
+    day("2026-09-11", 480, 480), // after the counted-until date: ignored
+  ];
+  const summary = summarizeAttendance(days, {
+    countedUntil: "2026-09-10",
+    employedFrom: null,
+    employedTo: "2026-09-09",
+    holidays: new Set(["2026-09-08"]),
+    leave: new Map([
+      ["2026-09-05", true],
+      ["2026-09-07", false],
+    ]),
+    graceMinutes: 15,
+  });
+  assert.equal(summary.absentDays, 1);
+  assert.equal(summary.missingHours, 11);
+  assert.equal(summary.unpaidDays, 1);
+  assert.equal(summary.paidLeaveDays, 1);
+  assert.equal(summary.holidayDays, 1);
+  assert.equal(summary.outsideContractDays, 1);
+  assert.equal(summary.workedDays, 3); // the 3rd has an authorization but no punch
+  assert.equal(summary.workedHours, round3((540 + 240 + 470) / 60));
+});
+
+test("attendance: a hire on the 3rd makes the 1st and 2nd outside the contract", () => {
+  const summary = summarizeAttendance(
+    [day("2026-10-01", 480, 0), day("2026-10-02", 480, 0), day("2026-10-03", 300, 300)],
+    {
+      countedUntil: "2026-10-31",
+      employedFrom: "2026-10-03",
+      employedTo: null,
+      holidays: new Set(),
+      leave: new Map(),
+      graceMinutes: 5,
+    },
+  );
+  assert.equal(summary.outsideContractDays, 2);
+  assert.equal(summary.absentDays, 0);
+  assert.equal(summary.workedDays, 1);
 });

@@ -4687,3 +4687,50 @@ button.attendance-report-row:hover {
   color: #b45309;
   font-weight: 500;
 }
+
+/* Payroll and the time clock */
+.payroll-banner.is-info {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+}
+.payroll-row-print:disabled,
+.payslip-view-button:disabled,
+.payroll-table-actions .primary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.payslip-attendance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.payslip-attendance dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.payslip-attendance dl > div {
+  display: contents;
+}
+.payslip-attendance dt {
+  color: #6b7280;
+}
+.payslip-attendance dd {
+  color: #111827;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.payslip-attendance dd.is-negative {
+  color: #b91c1c;
+}
+.payslip-exempt {
+  margin-top: 12px;
+}

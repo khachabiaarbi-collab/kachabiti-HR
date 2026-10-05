@@ -29,7 +29,16 @@ export type PayContract = {
   weeklyHours: number;
   headOfFamily: boolean;
   dependentChildren: number;
+  /** "sivp" contracts are exempt from CNSS, IRPP and CSS. */
+  contractType?: string;
 };
+
+/** Contract types with no CNSS (employee or employer), IRPP or CSS. */
+export const EXEMPT_CONTRACT_TYPES = ["sivp"];
+
+export function isExemptContract(contractType: string | undefined) {
+  return contractType != null && EXEMPT_CONTRACT_TYPES.includes(contractType);
+}
 
 export type PayItem = {
   code: string;
@@ -47,6 +56,8 @@ export type PayVariables = {
   unpaidDays: number;
   /** Working days before the hire date or after the contract end. */
   outsideContractDays: number;
+  /** Scheduled working days with no punch and no approved leave. */
+  absentDays: number;
   /** Unjustified absence hours to deduct. */
   absenceHours: number;
   /** Overtime hours paid at the overtime rate. */
@@ -89,6 +100,7 @@ export const PAY_LABELS = {
   base: "Salaire de base",
   unpaid: "Retenue congé sans solde",
   outside: "Prorata entrée / sortie",
+  absentDays: "Retenue absences non justifiées",
   absence: "Retenue absences",
   overtime: "Heures supplémentaires",
   cnss: "Cotisation CNSS",
@@ -153,6 +165,9 @@ export function calculatePayslip(
   items: PayItem[] = [],
 ): PayResult {
   const lines: PayLine[] = [];
+  // Payslips saved before a variable existed have it undefined.
+  const v = (value: number | undefined) => Math.max(0, Number(value) || 0);
+  const exempt = isExemptContract(contract.contractType);
   const hours = monthlyHours(contract.weeklyHours);
   const hourly =
     contract.payBasis === "hourly"
@@ -164,7 +179,7 @@ export function calculatePayslip(
   // Earnings
   const baseAmount =
     contract.payBasis === "hourly"
-      ? hourly * Math.max(0, variables.workedHours)
+      ? hourly * v(variables.workedHours)
       : contract.baseSalary;
   lines.push(
     line("base", PAY_LABELS.base, "earning", baseAmount, {
@@ -181,7 +196,7 @@ export function calculatePayslip(
     const outside = Math.min(
       remaining,
       round3(
-        hourly * dailyHours(contract.weeklyHours) * Math.max(0, variables.outsideContractDays),
+        hourly * dailyHours(contract.weeklyHours) * v(variables.outsideContractDays),
       ),
     );
     if (outside > 0) {
@@ -196,7 +211,7 @@ export function calculatePayslip(
     }
     const unpaid = Math.min(
       remaining,
-      round3(hourly * dailyHours(contract.weeklyHours) * Math.max(0, variables.unpaidDays)),
+      round3(hourly * dailyHours(contract.weeklyHours) * v(variables.unpaidDays)),
     );
     if (unpaid > 0) {
       remaining = round3(remaining - unpaid);
@@ -208,7 +223,21 @@ export function calculatePayslip(
         }),
       );
     }
-    const absence = Math.min(remaining, round3(hourly * Math.max(0, variables.absenceHours)));
+    const absentDays = Math.min(
+      remaining,
+      round3(hourly * dailyHours(contract.weeklyHours) * v(variables.absentDays)),
+    );
+    if (absentDays > 0) {
+      remaining = round3(remaining - absentDays);
+      lines.push(
+        line("absent_days", PAY_LABELS.absentDays, "earning", -absentDays, {
+          base: variables.absentDays,
+          subjectToCnss: true,
+          taxable: true,
+        }),
+      );
+    }
+    const absence = Math.min(remaining, round3(hourly * v(variables.absenceHours)));
     if (absence > 0) {
       lines.push(
         line("absence", PAY_LABELS.absence, "earning", -absence, {
@@ -220,13 +249,13 @@ export function calculatePayslip(
     }
   }
 
-  if (variables.overtimeHours > 0) {
+  if (v(variables.overtimeHours) > 0) {
     lines.push(
       line(
         "overtime",
         PAY_LABELS.overtime,
         "earning",
-        hourly * rates.overtimeRate * variables.overtimeHours,
+        hourly * rates.overtimeRate * v(variables.overtimeHours),
         {
           base: variables.overtimeHours,
           rate: rates.overtimeRate,
@@ -256,14 +285,16 @@ export function calculatePayslip(
     earnings.filter((entry) => entry.taxable).reduce((sum, entry) => sum + entry.amount, 0),
   );
 
-  // Employee contributions
-  const cnssEmployee = round3(Math.max(0, cnssBase) * rates.cnssEmployeeRate);
-  lines.push(
-    line("cnss", PAY_LABELS.cnss, "contribution", cnssEmployee, {
-      base: cnssBase,
-      rate: rates.cnssEmployeeRate,
-    }),
-  );
+  // Employee contributions (none on an exempt contract such as SIVP)
+  const cnssEmployee = exempt ? 0 : round3(Math.max(0, cnssBase) * rates.cnssEmployeeRate);
+  if (!exempt) {
+    lines.push(
+      line("cnss", PAY_LABELS.cnss, "contribution", cnssEmployee, {
+        base: cnssBase,
+        rate: rates.cnssEmployeeRate,
+      }),
+    );
+  }
 
   // CNSS on taxable earnings only is deductible from taxable income.
   const taxableCnss = round3(
@@ -274,7 +305,7 @@ export function calculatePayslip(
         .reduce((sum, entry) => sum + entry.amount, 0),
     ) * rates.cnssEmployeeRate,
   );
-  const taxableIncome = round3(Math.max(0, taxableGross - taxableCnss));
+  const taxableIncome = exempt ? 0 : round3(Math.max(0, taxableGross - taxableCnss));
   const annualTaxable = round3(taxableIncome * 12);
   const professionalExpenses = round3(
     Math.min(annualTaxable * rates.professionalExpensesRate, rates.professionalExpensesCap),
@@ -291,9 +322,11 @@ export function calculatePayslip(
   // CSS applies only to income above the tax-free bracket.
   const css = annualIrpp > 0 ? round3((annualNetTaxable * rates.cssRate) / 12) : 0;
 
-  lines.push(
-    line("irpp", PAY_LABELS.irpp, "contribution", irpp, { base: taxableIncome }),
-  );
+  if (!exempt) {
+    lines.push(
+      line("irpp", PAY_LABELS.irpp, "contribution", irpp, { base: taxableIncome }),
+    );
+  }
   if (css > 0) {
     lines.push(
       line("css", PAY_LABELS.css, "contribution", css, {
@@ -315,14 +348,16 @@ export function calculatePayslip(
   const net = round3(gross - cnssEmployee - irpp - css - otherDeductions);
 
   // Employer side (not deducted from the employee)
-  const employerCnss = round3(Math.max(0, cnssBase) * rates.cnssEmployerRate);
-  const workAccident = round3(Math.max(0, cnssBase) * rates.workAccidentRate);
-  lines.push(
-    line("employer_cnss", PAY_LABELS.employerCnss, "employer", employerCnss, {
-      base: cnssBase,
-      rate: rates.cnssEmployerRate,
-    }),
-  );
+  const employerCnss = exempt ? 0 : round3(Math.max(0, cnssBase) * rates.cnssEmployerRate);
+  const workAccident = exempt ? 0 : round3(Math.max(0, cnssBase) * rates.workAccidentRate);
+  if (!exempt) {
+    lines.push(
+      line("employer_cnss", PAY_LABELS.employerCnss, "employer", employerCnss, {
+        base: cnssBase,
+        rate: rates.cnssEmployerRate,
+      }),
+    );
+  }
   if (workAccident > 0) {
     lines.push(
       line("work_accident", PAY_LABELS.workAccident, "employer", workAccident, {
@@ -430,4 +465,99 @@ export function amountInFrenchWords(amount: number) {
   const millimes = total % 1000;
   const dinarText = `${words(dinars)} dinar${dinars > 1 ? "s" : ""}`;
   return millimes ? `${dinarText} et ${words(millimes)} millimes` : dinarText;
+}
+
+// ---------------------------------------------------------------------------
+// Attendance → payroll variables
+// ---------------------------------------------------------------------------
+
+export type AttendanceDay = {
+  date: string;
+  scheduledMinutes: number;
+  workedMinutes: number;
+  authorizedMinutes: number;
+};
+
+export type AttendanceSummary = {
+  /** Days counted, from the 1st to `countedUntil` (the month end, or today in a month in progress). */
+  countedUntil: string;
+  scheduledDays: number;
+  workedDays: number;
+  holidayDays: number;
+  paidLeaveDays: number;
+  unpaidDays: number;
+  outsideContractDays: number;
+  absentDays: number;
+  missingHours: number;
+  workedHours: number;
+};
+
+/**
+ * Reads one employee's month of attendance. For each scheduled working day
+ * inside the contract: a public holiday or approved paid leave is paid; unpaid
+ * leave is counted as unpaid; no punch at all is an absent day; a short day
+ * loses the time missing beyond the grace period and approved authorizations.
+ * Scheduled days outside the contract are counted separately (pro-rata).
+ */
+export function summarizeAttendance(
+  days: AttendanceDay[],
+  options: {
+    countedUntil: string;
+    employedFrom: string | null;
+    employedTo: string | null;
+    holidays: ReadonlySet<string>;
+    /** Approved leave by date: true when unpaid. */
+    leave: ReadonlyMap<string, boolean>;
+    graceMinutes: number;
+  },
+): AttendanceSummary {
+  const summary: AttendanceSummary = {
+    countedUntil: options.countedUntil,
+    scheduledDays: 0,
+    workedDays: 0,
+    holidayDays: 0,
+    paidLeaveDays: 0,
+    unpaidDays: 0,
+    outsideContractDays: 0,
+    absentDays: 0,
+    missingHours: 0,
+    workedHours: 0,
+  };
+  let missingMinutes = 0;
+  let workedMinutes = 0;
+
+  for (const day of days) {
+    if (day.date > options.countedUntil) continue;
+    const employed =
+      (!options.employedFrom || day.date >= options.employedFrom) &&
+      (!options.employedTo || day.date <= options.employedTo);
+    if (employed) workedMinutes += Math.max(0, day.workedMinutes);
+    if (day.scheduledMinutes <= 0) continue;
+    if (options.holidays.has(day.date)) {
+      if (employed) summary.holidayDays += 1;
+      continue;
+    }
+    if (!employed) {
+      summary.outsideContractDays += 1;
+      continue;
+    }
+    summary.scheduledDays += 1;
+    const leave = options.leave.get(day.date);
+    if (leave !== undefined) {
+      if (leave) summary.unpaidDays += 1;
+      else summary.paidLeaveDays += 1;
+      continue;
+    }
+    if (day.workedMinutes <= 0 && day.authorizedMinutes <= 0) {
+      summary.absentDays += 1;
+      continue;
+    }
+    if (day.workedMinutes > 0) summary.workedDays += 1;
+    const missing = day.scheduledMinutes - day.workedMinutes - day.authorizedMinutes;
+    if (missing > options.graceMinutes) missingMinutes += missing;
+  }
+
+  summary.missingHours = round3(missingMinutes / 60);
+  summary.workedHours = round3(workedMinutes / 60);
+  return summary;
 }

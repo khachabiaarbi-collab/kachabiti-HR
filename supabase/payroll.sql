@@ -70,6 +70,11 @@ create table if not exists public.employee_contracts (
     check (pay_basis <> 'hourly' or hourly_rate is not null)
 );
 
+-- Pay follows the time clock: absent days and missing hours are deducted.
+-- Switch off for people who do not punch (e.g. management accounts).
+alter table public.employee_contracts
+  add column if not exists attendance_based boolean not null default true;
+
 create index if not exists employee_contracts_employee_idx
   on public.employee_contracts (employee_id, effective_from desc);
 
@@ -317,6 +322,10 @@ begin
   end if;
 
   if new.status = 'validated' and old.status = 'draft' then
+    -- Pay depends on the whole month of attendance.
+    if (new.period + interval '1 month')::date > (now() at time zone 'Africa/Tunis')::date then
+      raise exception 'Payroll month % is not finished yet', to_char(new.period, 'YYYY-MM');
+    end if;
     if not exists (
       select 1 from public.payroll_settings
       where year = extract(year from new.period)::integer and verified
@@ -433,6 +442,72 @@ drop trigger if exists employee_pay_components_audit on public.employee_pay_comp
 create trigger employee_pay_components_audit
 after insert or update or delete on public.employee_pay_components
 for each row execute function public.payroll_audit();
+
+-- ---------------------------------------------------------------------------
+-- Attendance for payroll: per employee and day of [p_from, p_to], the minutes
+-- scheduled (work segments of their schedule), worked (completed punch
+-- sessions) and covered by approved authorizations. Needs attendance.sql;
+-- plpgsql so payroll.sql still installs when attendance is not set up yet.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.payroll_attendance_month(p_from date, p_to date)
+returns table (
+  employee_id uuid,
+  work_date date,
+  scheduled_minutes integer,
+  worked_minutes integer,
+  authorized_minutes integer
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  person record;
+  day date;
+  schedule_value uuid;
+begin
+  if not public.payroll_is_admin() then
+    raise exception using message = 'FORBIDDEN';
+  end if;
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 31 then
+    raise exception using message = 'INVALID_DATE_RANGE';
+  end if;
+
+  for person in
+    select employee.id from public.employees employee
+    where coalesce(employee.status, 'active') <> 'inactive'
+  loop
+    for day in select generate_series(p_from, p_to, interval '1 day')::date loop
+      schedule_value := public.attendance_resolved_schedule(person.id, day);
+      employee_id := person.id;
+      work_date := day;
+      scheduled_minutes := coalesce((
+        select sum(extract(epoch from (segment.end_time - segment.start_time)) / 60)::integer
+        from public.work_schedule_segments segment
+        where segment.schedule_id = schedule_value
+          and segment.kind = 'work'
+          and segment.iso_weekday = extract(isodow from day)::integer
+      ), 0);
+      worked_minutes := case
+        when exists (
+          select 1 from public.attendance_punches punch
+          where punch.employee_id = person.id and punch.work_date = day and punch.voided_at is null
+        )
+        then coalesce((public.attendance_day_summary(person.id, day, clock_timestamp()) ->> 'workedMinutes')::integer, 0)
+        else 0
+      end;
+      authorized_minutes := coalesce((
+        select sum(item.duration_minutes)::integer
+        from public.authorizations item
+        where item.employee_id = person.id and item.date = day and item.status = 'approved'
+      ), 0);
+      return next;
+    end loop;
+  end loop;
+end;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Employer details printed on every payslip (single row)
@@ -588,3 +663,5 @@ revoke all on function public.payroll_run_published(uuid) from public;
 grant execute on function public.payroll_run_published(uuid) to authenticated;
 revoke all on function public.payroll_audit() from public;
 revoke all on function public.payroll_notify_validated() from public;
+revoke all on function public.payroll_attendance_month(date, date) from public;
+grant execute on function public.payroll_attendance_month(date, date) to authenticated;

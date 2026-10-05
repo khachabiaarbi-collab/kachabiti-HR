@@ -41,6 +41,7 @@ import {
 } from "@/lib/payroll";
 import {
   amountInFrenchWords,
+  isExemptContract,
   round3,
   type IrppBracket,
   type PayItem,
@@ -52,6 +53,7 @@ import {
   effectiveVariables,
   endEmployeeComponent,
   exclusionReason,
+  isMonthInProgress,
   loadCompany,
   loadComponents,
   loadContractPeriods,
@@ -109,6 +111,7 @@ type ContractForm = {
   cnssNumber: string;
   maritalStatus: MaritalStatus;
   headOfFamily: boolean;
+  attendanceBased: boolean;
   dependentChildren: string;
   bankName: string;
   rib: string;
@@ -129,6 +132,7 @@ function formFromContract(contract: EmployeeContract | null, today: string): Con
     dependentChildren: String(contract?.dependentChildren ?? 0),
     bankName: contract?.bankName ?? "",
     rib: contract?.rib ?? "",
+    attendanceBased: contract?.attendanceBased ?? true,
   };
 }
 
@@ -227,6 +231,7 @@ export function ContractSection({
           dependent_children: children,
           bank_name: form.bankName.trim() || null,
           rib: rib || null,
+          attendance_based: form.attendanceBased,
           created_by: user?.id ?? null,
         },
         { onConflict: "employee_id,effective_from" },
@@ -414,6 +419,21 @@ export function ContractSection({
         onChange={(value) => set("dependentChildren", value)}
       />
 
+      <p className="eyebrow contract-subhead">{t("contract.timeClock")}</p>
+      <label className="form-check">
+        <input
+          type="checkbox"
+          name="attendance_based"
+          checked={form.attendanceBased}
+          onChange={(event) => set("attendanceBased", event.target.checked)}
+        />
+        {t("contract.attendanceBased")}
+      </label>
+      <span className="contract-hint">
+        {form.attendanceBased ? t("contract.attendanceOn") : t("contract.attendanceOff")}
+      </span>
+      {form.contractType === "sivp" && <span className="contract-hint">{t("contract.sivpExempt")}</span>}
+
       <p className="eyebrow contract-subhead">{t("contract.bank")}</p>
       <Field
         label={t("contract.bankName")}
@@ -582,6 +602,7 @@ const WARNING_KEYS: Record<PayslipWarning, MessageKey> = {
   hourly_no_hours: "payroll.warn.hourly_no_hours",
   negative_net: "payroll.warn.negative_net",
   contract_ends: "payroll.warn.contract_ends",
+  attendance_unavailable: "payroll.warn.attendance_unavailable",
 };
 
 const STATUS_KEYS: Record<PayrollRun["status"], MessageKey> = {
@@ -734,6 +755,7 @@ export function PayrollView({
   }
 
   const isDraft = run?.status === "draft";
+  const inProgress = isMonthInProgress(period);
   const blockingRates = !settings?.verified;
 
   return (
@@ -768,6 +790,18 @@ export function PayrollView({
           </div>
         }
       />
+
+      {state === "ready" && inProgress && (
+        <div className="payroll-banner is-info">
+          <AlertTriangle size={17} />
+          <p>
+            {t("payroll.inProgress", {
+              month: monthLabel(period, dateLocale),
+              date: formatDisplayDate(monthRange(shiftMonth(period, 1)).from, dateLocale),
+            })}
+          </p>
+        </div>
+      )}
 
       {state === "ready" && blockingRates && (
         <div className="payroll-banner">
@@ -852,7 +886,15 @@ export function PayrollView({
                     <button type="button" className="secondary-button" onClick={() => void prepare()}>
                       <RefreshCw size={14} /> {busy ? t("panel.pleaseWait") : t("payroll.recalculate")}
                     </button>
-                    <Button onClick={() => setConfirm("validate")}>{t("payroll.validate")}</Button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => setConfirm("validate")}
+                      disabled={inProgress}
+                      title={inProgress ? t("payroll.validateAfterMonth") : undefined}
+                    >
+                      {t("payroll.validate")}
+                    </button>
                   </>
                 )}
                 {run.status === "validated" && (
@@ -948,6 +990,7 @@ export function PayrollView({
                         aria-label={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
                         title={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
                         onClick={() => setPrinting([payslip])}
+                        disabled={inProgress}
                       >
                         <Download size={15} />
                       </button>
@@ -976,6 +1019,7 @@ export function PayrollView({
           payslips={payslips}
           flash={flash}
           onPrintAll={() => setPrinting(sorted)}
+          inProgress={inProgress}
         />
       )}
 
@@ -986,6 +1030,7 @@ export function PayrollView({
           key={openPayslip.id}
           payslip={openPayslip}
           editable={isDraft}
+          inProgress={inProgress}
           verified={Boolean(settings?.verified)}
           close={() => setOpenPayslip(null)}
           flash={flash}
@@ -1070,6 +1115,7 @@ const VARIABLE_FIELDS: { key: keyof PayVariables; label: MessageKey; hourlyOnly?
   { key: "workedHours", label: "payroll.var.workedHours", hourlyOnly: true },
   { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true },
   { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true },
+  { key: "absentDays", label: "payroll.var.absentDays", monthlyOnly: true },
   { key: "absenceHours", label: "payroll.var.absenceHours", monthlyOnly: true },
   { key: "overtimeHours", label: "payroll.var.overtimeHours" },
 ];
@@ -1118,6 +1164,7 @@ export function PayslipLines({ payslip }: { payslip: Payslip }) {
 function PayslipPanel({
   payslip,
   editable,
+  inProgress,
   verified,
   close,
   flash: rawFlash,
@@ -1125,6 +1172,7 @@ function PayslipPanel({
 }: {
   payslip: Payslip;
   editable: boolean;
+  inProgress: boolean;
   verified: boolean;
   close: () => void;
   flash: (message: string) => void;
@@ -1139,6 +1187,7 @@ function PayslipPanel({
       workedHours: String(current.workedHours),
       unpaidDays: String(current.unpaidDays),
       outsideContractDays: String(current.outsideContractDays ?? 0),
+      absentDays: String(current.absentDays ?? 0),
       absenceHours: String(current.absenceHours),
       overtimeHours: String(current.overtimeHours),
     };
@@ -1213,8 +1262,36 @@ function PayslipPanel({
         </ul>
       )}
 
+      {inputs.attendance && (
+        <div className="payslip-attendance">
+          <p className="eyebrow">{t("payroll.attTitle")}</p>
+          <span className="contract-hint">
+            {t("payroll.attUntil", { date: formatDisplayDate(inputs.attendance.countedUntil, dateLocale) })}
+          </span>
+          <dl>
+            <div><dt>{t("payroll.attScheduled")}</dt><dd>{inputs.attendance.scheduledDays}</dd></div>
+            <div><dt>{t("payroll.attWorked")}</dt><dd>{inputs.attendance.workedDays}</dd></div>
+            <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.absentDays ? "is-negative" : undefined}>{inputs.attendance.absentDays}</dd></div>
+            <div><dt>{t("payroll.attMissing")}</dt><dd>{inputs.attendance.missingHours.toLocaleString(dateLocale)} h</dd></div>
+            <div><dt>{t("payroll.attLeave")}</dt><dd>{inputs.attendance.paidLeaveDays} / {inputs.attendance.unpaidDays}</dd></div>
+            <div><dt>{t("payroll.attHolidays")}</dt><dd>{inputs.attendance.holidayDays}</dd></div>
+            <div><dt>{t("payroll.attOutside")}</dt><dd>{inputs.attendance.outsideContractDays}</dd></div>
+            <div><dt>{t("payroll.attHours")}</dt><dd>{inputs.attendance.workedHours.toLocaleString(dateLocale)} h</dd></div>
+          </dl>
+        </div>
+      )}
+      {isExemptContract(inputs.contract.contractType) && (
+        <p className="contract-hint payslip-exempt">{t("contract.sivpExempt")}</p>
+      )}
+
       <PayslipLines payslip={payslip} />
-      <button type="button" className="secondary-button payslip-view-button" onClick={() => setShowDocument(true)}>
+      <button
+        type="button"
+        className="secondary-button payslip-view-button"
+        onClick={() => setShowDocument(true)}
+        disabled={inProgress}
+        title={inProgress ? t("payroll.validateAfterMonth") : undefined}
+      >
         <Printer size={15} /> {t("payslip.view")}
       </button>
       {showDocument && <PayslipDocument payslips={[payslip]} onClose={() => setShowDocument(false)} />}
@@ -1891,6 +1968,9 @@ function PayslipSheet({ payslip, company }: { payslip: Payslip; company: Payroll
             ))}
             <div><dt>Coût total employeur</dt><dd>{frAmount(payslip.employerCost)}</dd></div>
           </dl>
+          {isExemptContract(inputs.contract.contractType) && (
+            <p>Contrat SIVP : exonéré de cotisations CNSS, d’IRPP et de CSS.</p>
+          )}
           <p>Conservez ce bulletin sans limitation de durée.</p>
         </section>
       </article>
@@ -1983,12 +2063,14 @@ function PayrollExports({
   payslips,
   flash,
   onPrintAll,
+  inProgress,
 }: {
   period: string;
   run: PayrollRun;
   payslips: Payslip[];
   flash: (message: string) => void;
   onPrintAll: () => void;
+  inProgress: boolean;
 }) {
   const { t } = useLanguage();
   const [busy, setBusy] = useState<string | null>(null);
@@ -2044,13 +2126,15 @@ function PayrollExports({
           type="button"
           className="payroll-export"
           onClick={onPrintAll}
-          disabled={payslips.length === 0}
+          disabled={payslips.length === 0 || inProgress}
         >
           <Printer size={16} />
           <span>
             <b>{t("payslip.exportAll")}</b>
             <small>
-              {published
+              {inProgress
+                ? t("payroll.validateAfterMonth")
+                : published
                 ? t("payslip.exportAllNote", { count: payslips.length })
                 : t("payslip.exportAllDraft")}
             </small>
