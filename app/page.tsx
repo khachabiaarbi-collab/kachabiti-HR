@@ -747,6 +747,7 @@ export default function Page() {
           balances={balances}
           vacation={vacation.figures?.get(selected.id) ?? null}
           canManagePayroll={role === "Admin"}
+          canManageAccounts={role === "Admin"}
           close={() => setSelected(null)}
           flash={flash}
           onSaved={(employee, nextSolde) => {

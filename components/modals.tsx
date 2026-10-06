@@ -51,6 +51,7 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
+import { updateEmployeeAccount } from "@/lib/employee-account";
 import type { VacationFigure } from "@/lib/use-leave-hours";
 import {
   formatDaysLabel,
@@ -852,6 +853,7 @@ export function EmployeeDetail({
   balances = [],
   vacation = null,
   canManagePayroll = false,
+  canManageAccounts = false,
   close,
   flash,
   onSaved,
@@ -863,6 +865,8 @@ export function EmployeeDetail({
   /** Ledger + time-clock accrual, from the vacation balance service. */
   vacation?: VacationFigure | null;
   canManagePayroll?: boolean;
+  /** Admin: change the sign-in email and password. */
+  canManageAccounts?: boolean;
   close: () => void;
   flash: (message: string) => void;
   onSaved: (employee: Employee, balances: LeaveBalance[]) => void;
@@ -896,8 +900,24 @@ export function EmployeeDetail({
     ),
   );
   const [saving, setSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
   const t = useT();
   const { dateLocale } = useLanguage();
+
+  const changePassword = async () => {
+    if (savingPassword) return;
+    if (newPassword.length < 8) return flash(t("panel.passwordShort"));
+    if (newPassword !== confirmPassword) return flash(t("panel.passwordMismatch"));
+    setSavingPassword(true);
+    const message = await updateEmployeeAccount({ employeeId: employee.id, password: newPassword });
+    setSavingPassword(false);
+    if (message) return flash(message);
+    setNewPassword("");
+    setConfirmPassword("");
+    flash(t("panel.passwordChanged", { name: employee.name }));
+  };
 
   const applyHireSolde = (nextStart: string, nextMonthly: string) => {
     setStartDate(nextStart);
@@ -939,6 +959,15 @@ export function EmployeeDetail({
   const save = async () => {
     if (!name.trim() || !email.trim() || saving) return;
     setSaving(true);
+    // The sign-in email lives in Supabase Auth: change it there first.
+    if (canManageAccounts && email.trim().toLowerCase() !== employee.email.trim().toLowerCase()) {
+      const message = await updateEmployeeAccount({ employeeId: employee.id, email: email.trim() });
+      if (message) {
+        setSaving(false);
+        flash(message);
+        return;
+      }
+    }
     const supabase = createClient();
     const departmentName =
       departments.find((department) => department.id === departmentId)?.name ??
@@ -1026,7 +1055,14 @@ export function EmployeeDetail({
         <div className="detail-block">
           <p className="eyebrow">{t("panel.details")}</p>
           <Field label={t("profile.fullName")} name="full_name" value={name} onChange={setName} />
-          <Field label={t("profile.workEmail")} name="email" value={email} onChange={setEmail} />
+          <Field
+            label={t("profile.workEmail")}
+            name="email"
+            value={email}
+            onChange={canManageAccounts ? setEmail : undefined}
+            readOnly={!canManageAccounts}
+          />
+          {canManageAccounts && <span className="contract-hint">{t("panel.emailNote")}</span>}
           <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
           <Field label={t("profile.jobTitle")} name="job_title" value={jobTitle} onChange={setJobTitle} />
           <label className="form-label">
@@ -1084,6 +1120,29 @@ export function EmployeeDetail({
           />
           <span className="contract-hint">{t("panel.rateNote")}</span>
         </div>
+        {canManageAccounts && (
+          <div className="detail-block">
+            <p className="eyebrow">{t("panel.accountTitle")}</p>
+            <span className="contract-hint">{t("panel.accountNote")}</span>
+            <Field
+              label={t("panel.newPassword")}
+              name="new_password"
+              type="password"
+              value={newPassword}
+              onChange={setNewPassword}
+            />
+            <Field
+              label={t("panel.confirmPassword")}
+              name="confirm_password"
+              type="password"
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+            />
+            <Button secondary onClick={() => void changePassword()}>
+              {savingPassword ? t("modal.saving") : t("panel.setPassword")}
+            </Button>
+          </div>
+        )}
         <div className="detail-block">
           <p className="eyebrow">{t("panel.solde")}</p>
           <p className="page-subtitle">{t("panel.soldeNote")}</p>

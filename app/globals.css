@@ -4813,3 +4813,98 @@ button.attendance-report-row:hover {
   color: #6b7280;
   line-height: 1.45;
 }
+
+/* Selects: one modern look everywhere (comes last so it wins over the
+   per-screen rules, which set `background` and padding). */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 38px;
+  padding-right: 34px !important;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 11px center !important;
+  background-size: 15px 15px !important;
+  color: #1f2937;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+select:not([multiple]):hover:not(:disabled) {
+  border-color: #c3c9d6;
+  background-color: #fbfbfd;
+}
+select:not([multiple]):focus,
+select:not([multiple]):focus-visible {
+  border-color: #1f3a8a;
+  box-shadow: 0 0 0 3px rgba(31, 58, 138, 0.14);
+  outline: none;
+}
+select:not([multiple]):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+select option {
+  color: #1f2937;
+  font-weight: 500;
+}
+
+/* Attendance report: the period uses the shared range picker */
+.attendance-filter-range {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 650;
+}
+.attendance-report-filters .month-switcher span {
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  select:not([multiple]) {
+    transition: none;
+  }
+}
+
+/* Direct attendance correction (staff) */
+.attendance-direct-button {
+  margin-left: auto;
+  align-self: flex-end;
+}
+.attendance-record-detail span.has-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.punch-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  font-style: normal;
+}
+.punch-actions button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #475569;
+}
+.punch-actions button:hover {
+  border-color: #c7d2fe;
+  color: #1f3a8a;
+  background: #f8faff;
+}
+.punch-add {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
