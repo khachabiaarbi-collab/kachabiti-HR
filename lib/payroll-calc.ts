@@ -68,6 +68,16 @@ export type PayVariables = {
   earnedHours?: number | null;
   /** Overtime hours paid at the overtime rate. */
   overtimeHours: number;
+  /**
+   * Time-clock pay (monthly contracts): scheduled hours of the whole month.
+   * When > 0 the salary is paid per hour: absenceHours (past), outsideHours,
+   * unpaidHours and notYetHours are deducted at salary ÷ scheduledHours, and
+   * the day-based fields above are ignored.
+   */
+  scheduledHours?: number | null;
+  outsideHours?: number;
+  unpaidHours?: number;
+  notYetHours?: number;
 };
 
 export type PayLineKind = "earning" | "deduction" | "contribution" | "employer";
@@ -108,6 +118,7 @@ export const PAY_LABELS = {
   outside: "Prorata entrée / sortie",
   absentDays: "Retenue absences non justifiées",
   remaining: "Période du mois non encore travaillée",
+  absenceHours: "Retenue heures non travaillées",
   absence: "Retenue absences",
   overtime: "Heures supplémentaires",
   cnss: "Cotisation CNSS",
@@ -175,7 +186,8 @@ export function calculatePayslip(
   // Payslips saved before a variable existed have it undefined.
   const v = (value: number | undefined) => Math.max(0, Number(value) || 0);
   const exempt = isExemptContract(contract.contractType);
-  const hours = monthlyHours(contract.weeklyHours);
+  const clockMode = contract.payBasis === "monthly" && v(variables.scheduledHours ?? 0) > 0;
+  const hours = clockMode ? v(variables.scheduledHours ?? 0) : monthlyHours(contract.weeklyHours);
   const hourly =
     contract.payBasis === "hourly"
       ? contract.hourlyRate ?? 0
@@ -190,14 +202,34 @@ export function calculatePayslip(
       : contract.baseSalary;
   lines.push(
     line("base", PAY_LABELS.base, "earning", baseAmount, {
-      base: contract.payBasis === "hourly" ? variables.workedHours : null,
-      rate: contract.payBasis === "hourly" ? round3(hourly) : null,
+      base: contract.payBasis === "hourly" ? variables.workedHours : clockMode ? hours : null,
+      rate: contract.payBasis === "hourly" || clockMode ? round3(hourly) : null,
       subjectToCnss: true,
       taxable: true,
     }),
   );
 
-  if (contract.payBasis === "monthly") {
+  if (clockMode) {
+    // Paid per hour against the month's schedule; deductions cannot exceed the base.
+    let remaining = round3(baseAmount);
+    const deduct = (code: string, label: string, amountHours: number | undefined) => {
+      const value = Math.min(remaining, round3(hourly * v(amountHours)));
+      if (value <= 0) return;
+      remaining = round3(remaining - value);
+      lines.push(
+        line(code, label, "earning", -value, {
+          base: v(amountHours),
+          rate: round3(hourly),
+          subjectToCnss: true,
+          taxable: true,
+        }),
+      );
+    };
+    deduct("outside", PAY_LABELS.outside, variables.outsideHours);
+    deduct("unpaid", PAY_LABELS.unpaid, variables.unpaidHours);
+    deduct("absence", PAY_LABELS.absenceHours, variables.absenceHours);
+    deduct("remaining", PAY_LABELS.remaining, variables.notYetHours);
+  } else if (contract.payBasis === "monthly") {
     // Absences cannot take the base below zero.
     let remaining = round3(baseAmount);
     const outside = Math.min(
@@ -497,6 +529,10 @@ export type AttendanceDay = {
   scheduledMinutes: number;
   workedMinutes: number;
   authorizedMinutes: number;
+  /** Tunis local "HH:MM" windows, used by the quarter-hour rules when present. */
+  segments?: { start: string; end: string }[];
+  sessions?: { in: string; out: string | null }[];
+  authorizations?: { start: string; end: string }[];
 };
 
 export type AttendanceSummary = {
@@ -513,7 +549,111 @@ export type AttendanceSummary = {
   workedHours: number;
   /** Hours that count as paid so far: punched (capped at the schedule), authorized, holidays, paid leave. */
   earnedHours: number;
+  /** Quarter-hour reading of the month (time-clock pay). */
+  clock?: ClockMonth;
 };
+
+/**
+ * The month's scheduled hours split five ways; the parts always add up to
+ * `scheduledHours`.
+ */
+export type ClockMonth = {
+  scheduledHours: number;
+  /** Worked (quarter-hour rules), authorized, public holidays and paid leave. */
+  creditedHours: number;
+  /** Before the hire date or after the contract end. */
+  outsideHours: number;
+  unpaidHours: number;
+  /** Past scheduled time not credited: absences, lateness, early leaving. */
+  absenceHours: number;
+  /** Month in progress: the rest of today and the days after. */
+  notYetHours: number;
+  overtimeHours: number;
+  lateCount: number;
+  earlyLeaveCount: number;
+  absentDays: number;
+};
+
+/** Reads a month with the quarter-hour rules (see creditDay). */
+export function summarizeClockMonth(
+  days: AttendanceDay[],
+  options: {
+    employedFrom: string | null;
+    employedTo: string | null;
+    holidays: ReadonlySet<string>;
+    leave: ReadonlyMap<string, boolean>;
+    /** Month in progress: today's date and the current time "HH:MM". */
+    today?: string | null;
+    now?: string | null;
+  },
+): ClockMonth {
+  const minutes = { scheduled: 0, credited: 0, outside: 0, unpaid: 0, absence: 0, notYet: 0, overtime: 0 };
+  let lateCount = 0;
+  let earlyLeaveCount = 0;
+  let absentDays = 0;
+  const today = options.today ?? null;
+
+  for (const day of days) {
+    const scheduled = day.scheduledMinutes;
+    if (scheduled <= 0) continue;
+    minutes.scheduled += scheduled;
+    const employed =
+      (!options.employedFrom || day.date >= options.employedFrom) &&
+      (!options.employedTo || day.date <= options.employedTo);
+    if (!employed) {
+      minutes.outside += scheduled;
+      continue;
+    }
+    if (today !== null && day.date > today) {
+      minutes.notYet += scheduled;
+      continue;
+    }
+    const leave = options.leave.get(day.date);
+    if (options.holidays.has(day.date) || leave === false) {
+      minutes.credited += scheduled;
+      continue;
+    }
+    if (leave === true) {
+      minutes.unpaid += scheduled;
+      continue;
+    }
+    const isToday = today !== null && day.date === today;
+    const credit = day.segments
+      ? creditDay(day.segments, day.sessions ?? [], day.authorizations ?? [], isToday ? options.now ?? null : null)
+      : {
+          creditedMinutes: Math.min(scheduled, Math.max(0, day.workedMinutes) + Math.max(0, day.authorizedMinutes)),
+          overtimeMinutes: 0,
+          lateCount: 0,
+          earlyLeaveCount: 0,
+        };
+    const credited = Math.min(scheduled, credit.creditedMinutes);
+    minutes.credited += credited;
+    minutes.overtime += credit.overtimeMinutes;
+    lateCount += credit.lateCount;
+    // Today is not over: leaving "early" cannot be judged yet.
+    if (!isToday) earlyLeaveCount += credit.earlyLeaveCount;
+    if (isToday) {
+      minutes.notYet += scheduled - credited;
+    } else {
+      minutes.absence += scheduled - credited;
+      if (credited === 0) absentDays += 1;
+    }
+  }
+
+  const hours = (value: number) => round3(value / 60);
+  return {
+    scheduledHours: hours(minutes.scheduled),
+    creditedHours: hours(minutes.credited),
+    outsideHours: hours(minutes.outside),
+    unpaidHours: hours(minutes.unpaid),
+    absenceHours: hours(minutes.absence),
+    notYetHours: hours(minutes.notYet),
+    overtimeHours: hours(minutes.overtime),
+    lateCount,
+    earlyLeaveCount,
+    absentDays,
+  };
+}
 
 /**
  * Reads one employee's month of attendance. For each scheduled working day
@@ -606,4 +746,104 @@ export function summarizeAttendance(
   summary.workedHours = round3(workedMinutes / 60);
   summary.earnedHours = round3(earnedMinutes / 60);
   return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Quarter-hour discipline rules (time clock → credited time)
+// ---------------------------------------------------------------------------
+//
+// Time counts in quarter hours and only inside the schedule:
+// - an entry is moved up to the next quarter (07:55 → 08:00 at the schedule
+//   start, 08:01 or 08:10 → 08:15); there is no tolerance;
+// - an exit is moved down to the previous quarter (08:50 → 08:45) and never
+//   counts past the end of the schedule (17:05 or 17:30 → 17:00);
+// - approved authorizations count as worked time;
+// - overtime is the time after the end of the schedule, counted only when the
+//   full scheduled day was earned and the extra reaches one hour.
+
+export type TimeWindow = { start: string; end: string };
+export type PunchSession = { in: string; out: string | null };
+
+export type DayCredit = {
+  creditedMinutes: number;
+  overtimeMinutes: number;
+  /** Arrived after the start of a scheduled segment (morning or after the break). */
+  lateCount: number;
+  /** Left before the end of a scheduled segment. */
+  earlyLeaveCount: number;
+};
+
+const QUARTER = 15;
+const OVERTIME_MINIMUM = 60;
+
+export function clockMinutes(value: string) {
+  const [hours = "0", minutes = "0"] = value.split(":");
+  return (Number(hours) || 0) * 60 + (Number(minutes.slice(0, 2)) || 0);
+}
+
+const ceilQuarter = (minutes: number) => Math.ceil(minutes / QUARTER) * QUARTER;
+const floorQuarter = (minutes: number) => Math.floor(minutes / QUARTER) * QUARTER;
+
+function mergeIntervals(intervals: [number, number][]) {
+  const sorted = intervals.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
+
+function overlap(intervals: [number, number][], [from, to]: [number, number]) {
+  return intervals.reduce(
+    (total, [a, b]) => total + Math.max(0, Math.min(b, to) - Math.max(a, from)),
+    0,
+  );
+}
+
+/**
+ * Credited time of one day. `now` ("HH:MM") closes a session still open today;
+ * open sessions on other days are ignored (incomplete day).
+ */
+export function creditDay(
+  segments: TimeWindow[],
+  sessions: PunchSession[],
+  authorizations: TimeWindow[] = [],
+  now: string | null = null,
+): DayCredit {
+  const schedule = segments
+    .map(({ start, end }): [number, number] => [clockMinutes(start), clockMinutes(end)])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0]);
+  const worked = mergeIntervals(
+    sessions.flatMap(({ in: entry, out }): [number, number][] => {
+      const exit = out ?? now;
+      if (!exit) return [];
+      return [[ceilQuarter(clockMinutes(entry)), floorQuarter(clockMinutes(exit))]];
+    }),
+  );
+  const covered = mergeIntervals([
+    ...worked,
+    ...authorizations.map(({ start, end }): [number, number] => [clockMinutes(start), clockMinutes(end)]),
+  ]);
+
+  const scheduled = schedule.reduce((total, [a, b]) => total + (b - a), 0);
+  const creditedMinutes = schedule.reduce((total, window) => total + overlap(covered, window), 0);
+
+  let lateCount = 0;
+  let earlyLeaveCount = 0;
+  for (const [a, b] of schedule) {
+    const inside = covered.filter(([x, y]) => y > a && x < b);
+    if (!inside.length) continue;
+    if (inside[0][0] > a) lateCount += 1;
+    if (inside[inside.length - 1][1] < b) earlyLeaveCount += 1;
+  }
+
+  const dayEnd = schedule.length ? schedule[schedule.length - 1][1] : 0;
+  const extra = schedule.length ? overlap(worked, [dayEnd, 24 * 60]) : 0;
+  const overtimeMinutes =
+    scheduled > 0 && creditedMinutes >= scheduled && extra >= OVERTIME_MINIMUM ? extra : 0;
+
+  return { creditedMinutes, overtimeMinutes, lateCount, earlyLeaveCount };
 }

@@ -339,10 +339,10 @@ begin
 end;
 $$;
 
--- Saturday 08:00–13:00 on the default week. Safe to re-run when weekdays already exist.
+-- Saturday 08:00–13:30 on the default week. Safe to re-run when weekdays already exist.
 insert into public.work_schedule_segments
   (schedule_id, iso_weekday, kind, start_time, end_time, position)
-select schedule.id, 6, 'work', time '08:00', time '13:00', 1
+select schedule.id, 6, 'work', time '08:00', time '13:30', 1
 from public.work_schedules schedule
 where schedule.is_default
   and not exists (
@@ -354,14 +354,14 @@ where schedule.is_default
   );
 
 update public.work_schedule_segments segment
-set end_time = time '13:00'
+set end_time = time '13:30'
 from public.work_schedules schedule
 where segment.schedule_id = schedule.id
   and schedule.is_default
   and segment.iso_weekday = 6
   and segment.kind = 'work'
   and segment.start_time = time '08:00'
-  and segment.end_time = time '12:00';
+  and segment.end_time in (time '12:00', time '13:00');
 
 create or replace function public.attendance_resolved_schedule(
   p_employee_id uuid,

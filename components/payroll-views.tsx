@@ -1116,13 +1116,23 @@ export function PayrollView({
 // One payslip: lines, variables and one-off items
 // ---------------------------------------------------------------------------
 
-const VARIABLE_FIELDS: { key: keyof PayVariables; label: MessageKey; hourlyOnly?: boolean; monthlyOnly?: boolean }[] = [
+const VARIABLE_FIELDS: {
+  key: keyof PayVariables;
+  label: MessageKey;
+  hourlyOnly?: boolean;
+  monthlyOnly?: boolean;
+  /** "only": time-clock (per hour) pay; "never": day-based pay. */
+  clock?: "only" | "never";
+}[] = [
   { key: "workedHours", label: "payroll.var.workedHours", hourlyOnly: true },
-  { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true },
-  { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true },
-  { key: "absentDays", label: "payroll.var.absentDays", monthlyOnly: true },
-  { key: "earnedHours", label: "payroll.var.earnedHours", monthlyOnly: true },
+  { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true, clock: "never" },
+  { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true, clock: "never" },
+  { key: "absentDays", label: "payroll.var.absentDays", monthlyOnly: true, clock: "never" },
+  { key: "earnedHours", label: "payroll.var.earnedHours", monthlyOnly: true, clock: "never" },
   { key: "absenceHours", label: "payroll.var.absenceHours", monthlyOnly: true },
+  { key: "unpaidHours", label: "payroll.var.unpaidHours", monthlyOnly: true, clock: "only" },
+  { key: "outsideHours", label: "payroll.var.outsideHours", monthlyOnly: true, clock: "only" },
+  { key: "notYetHours", label: "payroll.var.notYetHours", monthlyOnly: true, clock: "only" },
   { key: "overtimeHours", label: "payroll.var.overtimeHours" },
 ];
 
@@ -1197,6 +1207,10 @@ function PayslipPanel({
       earnedHours: current.earnedHours == null ? "" : String(current.earnedHours),
       absenceHours: String(current.absenceHours),
       overtimeHours: String(current.overtimeHours),
+      scheduledHours: String(current.scheduledHours ?? 0),
+      outsideHours: String(current.outsideHours ?? 0),
+      unpaidHours: String(current.unpaidHours ?? 0),
+      notYetHours: String(current.notYetHours ?? 0),
     };
   });
   const [oneOff, setOneOff] = useState<PayItem[]>(inputs.oneOff);
@@ -1213,9 +1227,12 @@ function PayslipPanel({
       .catch((error: Error) => flash(error.message));
   }, [editable, flash]);
 
+  const clockPay = (inputs.auto.scheduledHours ?? 0) > 0;
   const fields = VARIABLE_FIELDS.filter(
     (field) =>
       (inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly) &&
+      (field.clock === undefined || (field.clock === "only") === clockPay) &&
+      (field.key !== "notYetHours" || (inputs.auto.notYetHours ?? 0) > 0) &&
       // Hours earned so far only apply while the month is in progress.
       (field.key !== "earnedHours" || inputs.auto.earnedHours != null),
   );
@@ -1278,7 +1295,22 @@ function PayslipPanel({
           <span className="contract-hint">
             {t("payroll.attUntil", { date: formatDisplayDate(inputs.attendance.countedUntil, dateLocale) })}
           </span>
-          <dl>
+          {inputs.attendance.clock && (
+            <dl className="payslip-clock">
+              <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
+              {inputs.attendance.clock.notYetHours > 0 && (
+                <div><dt>{t("payroll.clockNotYet")}</dt><dd>{inputs.attendance.clock.notYetHours.toLocaleString(dateLocale)} h</dd></div>
+              )}
+              <div><dt>{t("payroll.clockOvertime")}</dt><dd>{inputs.attendance.clock.overtimeHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockLate")}</dt><dd className={inputs.attendance.clock.lateCount ? "is-negative" : undefined}>{inputs.attendance.clock.lateCount}</dd></div>
+              <div><dt>{t("payroll.clockEarly")}</dt><dd className={inputs.attendance.clock.earlyLeaveCount ? "is-negative" : undefined}>{inputs.attendance.clock.earlyLeaveCount}</dd></div>
+              <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.clock.absentDays ? "is-negative" : undefined}>{inputs.attendance.clock.absentDays}</dd></div>
+            </dl>
+          )}
+          {inputs.attendance.clock && <span className="contract-hint">{t("payroll.clockRule")}</span>}
+          <dl hidden={Boolean(inputs.attendance.clock)}>
             <div><dt>{t("payroll.attScheduled")}</dt><dd>{inputs.attendance.scheduledDays}</dd></div>
             <div><dt>{t("payroll.attWorked")}</dt><dd>{inputs.attendance.workedDays}</dd></div>
             <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.absentDays ? "is-negative" : undefined}>{inputs.attendance.absentDays}</dd></div>

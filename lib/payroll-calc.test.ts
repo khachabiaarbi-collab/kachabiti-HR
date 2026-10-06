@@ -7,6 +7,7 @@ import {
   amountInFrenchWords,
   calculatePayslip,
   progressiveTax,
+  creditDay,
   round3,
   summarizeAttendance,
   workingDaysInRange,
@@ -337,4 +338,174 @@ test("month in progress: a past day without punch is absent, future days are not
 test("a finished month ignores earned hours", () => {
   const result = calculatePayslip(monthly(1500), rates2026, { ...noVariables, earnedHours: null });
   assert.equal(result.gross, 1500);
+});
+
+// Quarter-hour discipline: the user's own examples on an 08:00–09:00 window.
+const hour = [{ start: "08:00", end: "09:00" }];
+const credit = (entry: string, exit: string | null, segments = hour, auth: { start: string; end: string }[] = []) =>
+  creditDay(segments, [{ in: entry, out: exit }], auth).creditedMinutes / 60;
+
+test("discipline: 07:55 → 09:00 counts 1 h", () => assert.equal(credit("07:55", "09:00"), 1));
+test("discipline: 07:55 → 09:15 counts 1 h", () => assert.equal(credit("07:55", "09:15"), 1));
+test("discipline: 08:01 → 09:00 counts 0.75 h", () => assert.equal(credit("08:01", "09:00"), 0.75));
+test("discipline: 08:01 → 09:15 counts 0.75 h", () => assert.equal(credit("08:01", "09:15"), 0.75));
+test("discipline: 08:10 → counts from 08:15", () => assert.equal(credit("08:10", "09:00"), 0.75));
+test("discipline: 08:00 → 08:50 counts 0.75 h (exit to 08:45)", () => assert.equal(credit("08:00", "08:50"), 0.75));
+test("discipline: 08:16 → counts from 08:30", () => assert.equal(credit("08:16", "09:00"), 0.5));
+
+const weekday = [
+  { start: "08:00", end: "12:00" },
+  { start: "13:00", end: "17:00" },
+];
+
+test("discipline: a full day with one session over the break counts 8 h, nothing after 17:00", () => {
+  const day = creditDay(weekday, [{ in: "07:50", out: "17:30" }]);
+  assert.equal(day.creditedMinutes, 480);
+  assert.equal(day.overtimeMinutes, 0); // 30 min extra is under one hour
+  assert.equal(day.lateCount, 0);
+});
+
+test("discipline: back from lunch at 13:05 counts from 13:15", () => {
+  const day = creditDay(weekday, [
+    { in: "08:00", out: "12:00" },
+    { in: "13:05", out: "17:05" },
+  ]);
+  assert.equal(day.creditedMinutes, 465);
+  assert.equal(day.lateCount, 1);
+});
+
+test("discipline: overtime when the 8 h are done and he leaves at 18:00", () => {
+  const day = creditDay(weekday, [
+    { in: "08:00", out: "12:00" },
+    { in: "13:00", out: "18:00" },
+  ]);
+  assert.equal(day.creditedMinutes, 480);
+  assert.equal(day.overtimeMinutes, 60);
+});
+
+test("discipline: no overtime when the day was not complete", () => {
+  const day = creditDay(weekday, [
+    { in: "08:20", out: "12:00" },
+    { in: "13:00", out: "18:30" },
+  ]);
+  assert.equal(day.creditedMinutes, 450);
+  assert.equal(day.overtimeMinutes, 0);
+});
+
+test("discipline: authorization 08:00–09:00 and arrival at 09:00 loses nothing", () => {
+  assert.equal(
+    creditDay(weekday, [{ in: "09:00", out: "17:00" }], [{ start: "08:00", end: "09:00" }]).creditedMinutes,
+    480,
+  );
+});
+
+test("discipline: authorization until 09:00 and arrival at 09:10 counts from 09:15", () => {
+  assert.equal(
+    creditDay(weekday, [{ in: "09:10", out: "17:00" }], [{ start: "08:00", end: "09:00" }]).creditedMinutes,
+    465,
+  );
+});
+
+test("discipline: Saturday 08:00–13:30", () => {
+  const saturday = [{ start: "08:00", end: "13:30" }];
+  assert.equal(creditDay(saturday, [{ in: "07:58", out: "13:40" }]).creditedMinutes, 330);
+  assert.equal(creditDay(saturday, [{ in: "08:05", out: "13:20" }]).creditedMinutes, 300);
+});
+
+test("discipline: a session still open today closes at now; other days it is ignored", () => {
+  assert.equal(creditDay(weekday, [{ in: "08:00", out: null }], [], "10:40").creditedMinutes, 150);
+  assert.equal(creditDay(weekday, [{ in: "08:00", out: null }]).creditedMinutes, 0);
+});
+
+import { summarizeClockMonth } from "./payroll-calc";
+
+const weekdaySegments = [
+  { start: "08:00", end: "12:00" },
+  { start: "13:00", end: "17:00" },
+];
+const clockDay = (date: string, sessions: { in: string; out: string | null }[], auth: { start: string; end: string }[] = []) => {
+  const weekdayIndex = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const segments = weekdayIndex === 0 ? [] : weekdayIndex === 6 ? [{ start: "08:00", end: "13:30" }] : weekdaySegments;
+  const scheduledMinutes = segments.reduce((total, s) => {
+    const [ah, am] = s.start.split(":").map(Number);
+    const [bh, bm] = s.end.split(":").map(Number);
+    return total + (bh * 60 + bm) - (ah * 60 + am);
+  }, 0);
+  return { date, scheduledMinutes, workedMinutes: 0, authorizedMinutes: 0, segments, sessions, authorizations: auth };
+};
+
+test("clock month: the five parts add up to the scheduled hours", () => {
+  const days = [
+    clockDay("2026-09-01", [{ in: "07:55", out: "12:00" }, { in: "13:00", out: "18:10" }]), // 8 h + 1 h overtime (18:10 rounds down to 18:00)
+    clockDay("2026-09-02", [{ in: "08:10", out: "12:00" }, { in: "13:00", out: "16:50" }]), // 7.5 h, late + early
+    clockDay("2026-09-03", []), // absent
+    clockDay("2026-09-04", []), // unpaid leave
+    clockDay("2026-09-05", [{ in: "08:00", out: "13:30" }]), // Saturday 5.5 h
+    clockDay("2026-09-07", [{ in: "08:00", out: "12:00" }]), // today: morning done, afternoon not yet
+    clockDay("2026-09-08", []), // future
+  ];
+  const month = summarizeClockMonth(days, {
+    employedFrom: "2026-09-01",
+    employedTo: null,
+    holidays: new Set(),
+    leave: new Map([["2026-09-04", true]]),
+    today: "2026-09-07",
+    now: "14:00",
+  });
+  assert.equal(month.scheduledHours, 8 * 6 + 5.5);
+  assert.equal(month.creditedHours, 8 + 7.5 + 5.5 + 4);
+  assert.equal(month.absenceHours, 0.5 + 8);
+  assert.equal(month.unpaidHours, 8);
+  assert.equal(month.notYetHours, 4 + 8);
+  assert.equal(month.overtimeHours, 1);
+  assert.equal(month.lateCount, 1);
+  assert.equal(month.earlyLeaveCount, 1);
+  assert.equal(month.absentDays, 1);
+  assert.equal(
+    round3(month.creditedHours + month.outsideHours + month.unpaidHours + month.absenceHours + month.notYetHours),
+    month.scheduledHours,
+  );
+});
+
+test("clock pay: salary per scheduled hour, deductions and overtime at 125 %", () => {
+  // 200 h scheduled, 1 h absence, 1 h overtime, 1000 TND → 5 TND / h.
+  const result = calculatePayslip(monthly(1000), rates2026, {
+    ...noVariables,
+    scheduledHours: 200,
+    absenceHours: 1,
+    overtimeHours: 1,
+  });
+  const byCode = Object.fromEntries(result.lines.map((line) => [line.code, line.amount]));
+  assert.equal(byCode.base, 1000);
+  assert.equal(byCode.absence, -5);
+  assert.equal(byCode.overtime, 6.25);
+  assert.equal(result.gross, 1001.25);
+});
+
+test("clock pay: Takwa (SIVP) paid only her credited hours so far", () => {
+  // 203.5 h scheduled in October; she has 9 h credited, 16 h outside her contract, the rest not yet.
+  const result = calculatePayslip({ ...monthly(800), contractType: "sivp" }, rates2026, {
+    ...noVariables,
+    scheduledHours: 203.5,
+    outsideHours: 16,
+    notYetHours: 203.5 - 16 - 9,
+  });
+  assert.equal(result.gross, round3((800 / 203.5) * 9));
+  assert.equal(result.cnssEmployee, 0);
+  assert.equal(result.irpp, 0);
+});
+
+test("clock month: an open session today is not an early departure", () => {
+  const month = summarizeClockMonth([clockDay("2026-10-06", [{ in: "08:00", out: null }])], {
+    employedFrom: null,
+    employedTo: null,
+    holidays: new Set(),
+    leave: new Map(),
+    today: "2026-10-06",
+    now: "11:00",
+  });
+  assert.equal(month.creditedHours, 3);
+  assert.equal(month.notYetHours, 5);
+  assert.equal(month.earlyLeaveCount, 0);
+  assert.equal(month.absenceHours, 0);
 });

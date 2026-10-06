@@ -14,6 +14,7 @@ import {
   isExemptContract,
   round3,
   summarizeAttendance,
+  summarizeClockMonth,
   workingDaysInRange,
   type AttendanceDay,
   type AttendanceSummary,
@@ -178,6 +179,16 @@ export function mapPayslip(row: PayslipRow): Payslip {
 // ---------------------------------------------------------------------------
 
 /** Today's date in Tunisia, "YYYY-MM-DD". */
+/** Current time in Tunisia, "HH:MM". */
+export function nowInTunis() {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Tunis",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
 export function todayInTunis() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Tunis" }).format(new Date());
 }
@@ -716,12 +727,25 @@ export async function prepareRun(
           graceMinutes: grace,
           today,
         });
+        // Quarter-hour rules (schedule windows, rounded punches, authorizations).
+        summary.clock = summarizeClockMonth(attendance.get(employee.id) ?? [], {
+          employedFrom,
+          employedTo: contract.contractEnd,
+          holidays: holidaySet,
+          leave,
+          today,
+          now: today ? nowInTunis() : null,
+        });
       } else {
         summary = undefined;
       }
     }
     const useClock = Boolean(summary) && contract.attendanceBased;
-    const workedHours = contract.payBasis === "hourly" ? summary?.workedHours ?? 0 : 0;
+    const clock = useClock ? summary?.clock ?? null : null;
+    const clockPay = Boolean(clock && clock.scheduledHours > 0);
+    // Hourly pay counts the credited hours (quarter-hour rules) when available.
+    const workedHours =
+      contract.payBasis === "hourly" ? summary?.clock?.creditedHours ?? summary?.workedHours ?? 0 : 0;
 
     const previous = existingByEmployee.get(employee.id);
     const inputs: PayslipInputs = {
@@ -734,32 +758,48 @@ export async function prepareRun(
       },
       contract,
       rates: ratesOnly(settings),
-      auto: {
-        workedHours,
-        // With the time clock, days follow the employee's own schedule.
-        unpaidDays: useClock ? summary!.unpaidDays : unpaidDays,
-        outsideContractDays: useClock ? summary!.outsideContractDays : outsideContractDays,
-        absentDays: useClock ? summary!.absentDays : 0,
-        absenceHours: useClock ? summary!.missingHours : 0,
-        // Month in progress: pay only the hours earned up to today.
-        earnedHours:
-          !today || contract.payBasis !== "monthly"
-            ? null
-            : useClock
-              ? summary!.earnedHours
-              : round3(
-                  workingDaysInRange(
-                    employedFrom > from ? employedFrom : from,
-                    today,
-                    from,
-                    to,
-                    sixDayWeek,
-                    holidaySet,
-                  ) *
-                    (contract.weeklyHours / (sixDayWeek ? 6 : 5)),
-                ),
-        overtimeHours: 0,
-      },
+      auto:
+        clockPay && contract.payBasis === "monthly"
+          ? {
+              workedHours: 0,
+              unpaidDays: 0,
+              outsideContractDays: 0,
+              absentDays: 0,
+              earnedHours: null,
+              // Paid per hour: salary ÷ scheduled hours of the month.
+              scheduledHours: clock!.scheduledHours,
+              outsideHours: clock!.outsideHours,
+              unpaidHours: clock!.unpaidHours,
+              absenceHours: clock!.absenceHours,
+              notYetHours: clock!.notYetHours,
+              overtimeHours: clock!.overtimeHours,
+            }
+          : {
+              workedHours,
+              // With the time clock, days follow the employee's own schedule.
+              unpaidDays: useClock ? summary!.unpaidDays : unpaidDays,
+              outsideContractDays: useClock ? summary!.outsideContractDays : outsideContractDays,
+              absentDays: useClock ? summary!.absentDays : 0,
+              absenceHours: useClock ? summary!.missingHours : 0,
+              // Month in progress: pay only the hours earned up to today.
+              earnedHours:
+                !today || contract.payBasis !== "monthly"
+                  ? null
+                  : useClock
+                    ? summary!.earnedHours
+                    : round3(
+                        workingDaysInRange(
+                          employedFrom > from ? employedFrom : from,
+                          today,
+                          from,
+                          to,
+                          sixDayWeek,
+                          holidaySet,
+                        ) *
+                          (contract.weeklyHours / (sixDayWeek ? 6 : 5)),
+                      ),
+              overtimeHours: contract.payBasis === "hourly" && useClock ? summary?.clock?.overtimeHours ?? 0 : 0,
+            },
       attendance: summary,
       manual: previous?.inputs.manual ?? {},
       fixed: employeeComponents
@@ -813,6 +853,9 @@ async function loadAttendanceMonth(from: string, to: string) {
     scheduled_minutes: number;
     worked_minutes: number;
     authorized_minutes: number;
+    segments?: { start: string; end: string }[] | null;
+    sessions?: { in: string; out: string | null }[] | null;
+    authorizations?: { start: string; end: string }[] | null;
   }[]) {
     const days = byEmployee.get(row.employee_id) ?? [];
     days.push({
@@ -820,6 +863,10 @@ async function loadAttendanceMonth(from: string, to: string) {
       scheduledMinutes: Number(row.scheduled_minutes) || 0,
       workedMinutes: Number(row.worked_minutes) || 0,
       authorizedMinutes: Number(row.authorized_minutes) || 0,
+      // Older payroll.sql (before the quarter-hour rules) returns no windows.
+      segments: row.segments ?? undefined,
+      sessions: row.sessions ?? undefined,
+      authorizations: row.authorizations ?? undefined,
     });
     byEmployee.set(row.employee_id, days);
   }

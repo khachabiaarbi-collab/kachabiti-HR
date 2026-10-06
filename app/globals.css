@@ -4734,3 +4734,6 @@ button.attendance-report-row:hover {
 .payslip-exempt {
   margin-top: 12px;
 }
+.payslip-attendance .payslip-clock + .contract-hint {
+  margin-top: 6px;
+}

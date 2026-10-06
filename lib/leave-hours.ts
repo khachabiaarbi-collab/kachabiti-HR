@@ -1,7 +1,7 @@
 import { DEFAULT_MONTHLY_LEAVE_DAYS } from "@/lib/map-rows";
 
 const WEEKDAY_MINUTES = 8 * 60;
-const SATURDAY_MINUTES = 5 * 60;
+const SATURDAY_MINUTES = 5.5 * 60;
 
 export type LeavePunch = {
   employeeId: string;

@@ -450,13 +450,20 @@ for each row execute function public.payroll_audit();
 -- plpgsql so payroll.sql still installs when attendance is not set up yet.
 -- ---------------------------------------------------------------------------
 
+-- Return shape changed (time windows added): drop before re-creating.
+drop function if exists public.payroll_attendance_month(date, date);
+
 create or replace function public.payroll_attendance_month(p_from date, p_to date)
 returns table (
   employee_id uuid,
   work_date date,
   scheduled_minutes integer,
   worked_minutes integer,
-  authorized_minutes integer
+  authorized_minutes integer,
+  -- Tunis local times "HH24:MI", for the quarter-hour discipline rules.
+  segments jsonb,
+  sessions jsonb,
+  authorizations jsonb
 )
 language plpgsql
 stable
@@ -467,6 +474,7 @@ declare
   person record;
   day date;
   schedule_value uuid;
+  summary jsonb;
 begin
   if not public.payroll_is_admin() then
     raise exception using message = 'FORBIDDEN';
@@ -483,26 +491,47 @@ begin
       schedule_value := public.attendance_resolved_schedule(person.id, day);
       employee_id := person.id;
       work_date := day;
-      scheduled_minutes := coalesce((
-        select sum(extract(epoch from (segment.end_time - segment.start_time)) / 60)::integer
-        from public.work_schedule_segments segment
-        where segment.schedule_id = schedule_value
-          and segment.kind = 'work'
-          and segment.iso_weekday = extract(isodow from day)::integer
-      ), 0);
-      worked_minutes := case
-        when exists (
-          select 1 from public.attendance_punches punch
-          where punch.employee_id = person.id and punch.work_date = day and punch.voided_at is null
-        )
-        then coalesce((public.attendance_day_summary(person.id, day, clock_timestamp()) ->> 'workedMinutes')::integer, 0)
-        else 0
-      end;
-      authorized_minutes := coalesce((
-        select sum(item.duration_minutes)::integer
-        from public.authorizations item
-        where item.employee_id = person.id and item.date = day and item.status = 'approved'
-      ), 0);
+
+      select
+        coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0)::integer,
+        coalesce(jsonb_agg(jsonb_build_object(
+          'start', to_char(segment.start_time, 'HH24:MI'),
+          'end', to_char(segment.end_time, 'HH24:MI')
+        ) order by segment.start_time), '[]'::jsonb)
+      into scheduled_minutes, segments
+      from public.work_schedule_segments segment
+      where segment.schedule_id = schedule_value
+        and segment.kind = 'work'
+        and segment.iso_weekday = extract(isodow from day)::integer;
+
+      if exists (
+        select 1 from public.attendance_punches punch
+        where punch.employee_id = person.id and punch.work_date = day and punch.voided_at is null
+      ) then
+        summary := public.attendance_day_summary(person.id, day, clock_timestamp());
+        worked_minutes := coalesce((summary ->> 'workedMinutes')::integer, 0);
+        select coalesce(jsonb_agg(jsonb_build_object(
+          'in', to_char(((item ->> 'entryAt')::timestamptz at time zone 'Africa/Tunis'), 'HH24:MI'),
+          'out', case when item ->> 'exitAt' is null then null
+            else to_char(((item ->> 'exitAt')::timestamptz at time zone 'Africa/Tunis'), 'HH24:MI') end
+        )), '[]'::jsonb)
+        into sessions
+        from jsonb_array_elements(coalesce(summary -> 'sessions', '[]'::jsonb)) item;
+      else
+        worked_minutes := 0;
+        sessions := '[]'::jsonb;
+      end if;
+
+      select
+        coalesce(sum(item.duration_minutes), 0)::integer,
+        coalesce(jsonb_agg(jsonb_build_object(
+          'start', to_char(item.start_time, 'HH24:MI'),
+          'end', to_char(item.end_time, 'HH24:MI')
+        )), '[]'::jsonb)
+      into authorized_minutes, authorizations
+      from public.authorizations item
+      where item.employee_id = person.id and item.date = day and item.status = 'approved';
+
       return next;
     end loop;
   end loop;
