@@ -180,7 +180,6 @@ export const en = {
   "employee.daysRemaining": "days remaining this year",
   "employee.sick": "Sick Leave",
   "employee.authBalance": "Auth Balance",
-  "employee.authOver": "{extra} over the free 8h",
   "employee.authUsed": "{used} used this month",
   "employee.thisMonth": "This month",
   "employee.authzTitle": "Authorization balance",
@@ -188,7 +187,6 @@ export const en = {
   "employee.authHours": "Approved hours",
   "employee.authNotBack": "Not worked back",
   "employee.authDaysOff": "Vacation days taken",
-  "employee.leftOf8h": "Left of 8h",
   "employee.extra": "Extra",
   "employee.authzPolicy":
     "An approved authorization takes vacation only for the hours you do not punch back. A finished day takes nothing.",
@@ -196,13 +194,6 @@ export const en = {
     "{unworked} of {used} approved were not punched back. {unworked} ÷ 8h = {days} vacation day taken. Punch those hours and this goes back to 0.",
   "employee.authzExplainNone":
     "This month's authorization hours are punched back. No vacation day is taken.",
-  "employee.authzExceeded": "You have exceeded the free 8h this month by {extra}",
-  "employee.takesOneDay": ". This takes 1 vacation day",
-  "employee.takesDays": ". This takes {count} vacation days",
-  "employee.usedOf8h": "{used} of 8h used this month",
-  "employee.overFree": " · {extra} over the free 8h",
-  "employee.takesOneShort": " · takes 1 vacation day",
-  "employee.takesDaysShort": " · takes {count} vacation days",
   "employee.alsoYours": "Also yours",
   "employee.familyTitle": "Family and special leave",
   "employee.familySubtitle": "These days are extra. They never take from your vacation.",
@@ -320,8 +311,6 @@ export const en = {
   "admin.viewAuthz": "View {name} authorization",
   "admin.approveAuthz":
     "Approve {name}'s authorization for {date} ({duration})? Only hours that stay unpunched come off vacation.",
-  "admin.approveAuthzDays":
-    "Approve {name}'s authorization for {date} ({duration})? This takes {days} vacation day(s) because they will be over the free 8h.",
   "admin.rejectAuthz": "Reject {name}'s authorization for {date} ({duration})?",
   "admin.departmentsEyebrow": "Admin / Workspace",
   "admin.addDepartment": "Add department",
@@ -417,9 +406,6 @@ export const en = {
   "modal.authzSubtitle":
     "An authorization is a few hours during a work day (doctor, errand). For a full day, use Request leave. Punch those hours back and vacation stays the same.",
   "modal.thisRequest": "This request",
-  "modal.exceeds8h": "This request exceeds the free 8h",
-  "modal.ifApprovedOne": ". If approved, it takes 1 vacation day",
-  "modal.ifApprovedDays": ". If approved, it takes {count} vacation days",
   "modal.overBy": " because you will be {extra} over",
   "modal.whichDay": "Which day?",
   "modal.from": "From",
@@ -1067,7 +1053,6 @@ export const fr: Record<keyof typeof en, string> = {
   "employee.daysRemaining": "jours restants cette année",
   "employee.sick": "Congé maladie",
   "employee.authBalance": "Solde d’autorisation",
-  "employee.authOver": "{extra} au-delà des 8h gratuites",
   "employee.authUsed": "{used} utilisés ce mois",
   "employee.thisMonth": "Ce mois",
   "employee.authzTitle": "Solde d’autorisation",
@@ -1075,7 +1060,6 @@ export const fr: Record<keyof typeof en, string> = {
   "employee.authHours": "Heures approuvées",
   "employee.authNotBack": "Pas rattrapées",
   "employee.authDaysOff": "Jours de congé retirés",
-  "employee.leftOf8h": "Reste sur 8h",
   "employee.extra": "Supplément",
   "employee.authzPolicy":
     "Une autorisation approuvée ne retire du congé que les heures non pointées. Une journée complète ne retire rien.",
@@ -1083,13 +1067,6 @@ export const fr: Record<keyof typeof en, string> = {
     "{unworked} sur {used} approuvées n'ont pas été rattrapées au pointage. {unworked} ÷ 8 h = {days} jour retiré du congé. Pointez ces heures et ce retrait revient à 0.",
   "employee.authzExplainNone":
     "Les heures d'autorisation de ce mois sont rattrapées au pointage. Aucun jour n'est retiré du congé.",
-  "employee.authzExceeded": "Vous avez dépassé les 8h gratuites ce mois de {extra}",
-  "employee.takesOneDay": ". Cela prend 1 jour de congé",
-  "employee.takesDays": ". Cela prend {count} jours de congé",
-  "employee.usedOf8h": "{used} sur 8h utilisés ce mois",
-  "employee.overFree": " · {extra} au-delà des 8h gratuites",
-  "employee.takesOneShort": " · prend 1 jour de congé",
-  "employee.takesDaysShort": " · prend {count} jours de congé",
   "employee.alsoYours": "Aussi pour vous",
   "employee.familyTitle": "Congés familiaux et exceptionnels",
   "employee.familySubtitle": "Ces jours sont en plus. Ils ne prennent pas sur vos congés annuels.",
@@ -1208,8 +1185,6 @@ export const fr: Record<keyof typeof en, string> = {
   "admin.viewAuthz": "Voir l’autorisation de {name}",
   "admin.approveAuthz":
     "Approuver l’autorisation de {name} pour le {date} ({duration}) ? Seules les heures non pointées retirent du congé.",
-  "admin.approveAuthzDays":
-    "Approuver l’autorisation de {name} pour le {date} ({duration}) ? Cela prend {days} jour(s) de congé car le plafond de 8h sera dépassé.",
   "admin.rejectAuthz": "Refuser l’autorisation de {name} pour le {date} ({duration}) ?",
   "admin.departmentsEyebrow": "Admin / Espace",
   "admin.addDepartment": "Ajouter un département",
@@ -1305,9 +1280,6 @@ export const fr: Record<keyof typeof en, string> = {
   "modal.authzSubtitle":
     "Une autorisation couvre quelques heures dans une journée (médecin, course). Pour une journée entière, utilisez Demander un congé. Si ces heures sont pointées, le congé ne change pas.",
   "modal.thisRequest": "Cette demande",
-  "modal.exceeds8h": "Cette demande dépasse les 8h gratuites",
-  "modal.ifApprovedOne": ". Si elle est approuvée, elle prend 1 jour de congé",
-  "modal.ifApprovedDays": ". Si elle est approuvée, elle prend {count} jours de congé",
   "modal.overBy": " car vous serez {extra} au-delà",
   "modal.whichDay": "Quel jour ?",
   "modal.from": "De",
