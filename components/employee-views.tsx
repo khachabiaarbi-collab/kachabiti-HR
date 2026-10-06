@@ -101,7 +101,7 @@ export function EmployeeView({
   setActive: (label: string) => void;
   requests: LeaveRequest[];
   authorizations: Authorization[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   setModal: (modal: ModalKind) => void;
   currentEmployee: Employee | null;
   balances: LeaveBalance[];
@@ -410,7 +410,7 @@ export function EmployeeView({
             confirm={async () => {
               const message = await deleteLeaveRequestRecord(pendingCancel.id);
               if (message) {
-                flash(message);
+                flash(message, "error");
                 return;
               }
               await reload();
@@ -435,7 +435,7 @@ export function EmployeeView({
                 pendingCancelAuthz.id,
               );
               if (message) {
-                flash(message);
+                flash(message, "error");
                 return;
               }
               await reload();
@@ -776,7 +776,7 @@ function Profile({
   employee,
   reload,
 }: {
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   employee: Employee | null;
   reload: () => Promise<void>;
 }) {
@@ -800,7 +800,7 @@ function Profile({
     try {
       const uploaded = await uploadEmployeeAvatar(payload);
       if (uploaded.error) {
-        flash(uploaded.error);
+        flash(uploaded.error, "error");
         return;
       }
       await reload();
@@ -813,22 +813,22 @@ function Profile({
   const save = async () => {
     if (saving || uploadingPhoto) return;
     if (!employee) {
-      flash(t("profile.mustSignIn"));
+      flash(t("profile.mustSignIn"), "error");
       return;
     }
 
     const current = currentPassword.trim();
     const next = newPassword.trim();
     if (current && !next) {
-      flash(t("profile.enterNewPassword"));
+      flash(t("profile.enterNewPassword"), "error");
       return;
     }
     if (next && !current) {
-      flash(t("profile.enterCurrentPassword"));
+      flash(t("profile.enterCurrentPassword"), "error");
       return;
     }
     if (next && next.length < 8) {
-      flash(t("profile.passwordShort"));
+      flash(t("profile.passwordShort"), "error");
       return;
     }
 
@@ -839,7 +839,7 @@ function Profile({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash(t("profile.mustSignIn"));
+      flash(t("profile.mustSignIn"), "error");
       return;
     }
 
@@ -849,7 +849,7 @@ function Profile({
       .eq("id", user.id);
     if (phoneError) {
       setSaving(false);
-      flash(phoneError.message);
+      flash(phoneError.message, "error");
       return;
     }
 
@@ -860,7 +860,7 @@ function Profile({
       });
       if (signError) {
         setSaving(false);
-        flash(signError.message);
+        flash(signError.message, "error");
         return;
       }
       const { error: passwordError } = await supabase.auth.updateUser({
@@ -868,7 +868,7 @@ function Profile({
       });
       if (passwordError) {
         setSaving(false);
-        flash(passwordError.message);
+        flash(passwordError.message, "error");
         return;
       }
       setCurrentPassword("");

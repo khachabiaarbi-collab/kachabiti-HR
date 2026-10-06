@@ -225,7 +225,7 @@ function shiftIsoDate(iso: string, days: number) {
 export function EmployeeTimeClock({
   flash,
 }: {
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const { t, dateLocale } = useLanguage();
   const { balance: leaveHours, reload: reloadLeaveHours } = useLeaveHourBalance();
@@ -300,7 +300,7 @@ export function EmployeeTimeClock({
           pendingIdempotencyKey.current = null;
           await load();
         }
-        flash(apiMessage(payload, t("att.punchFailed")));
+        flash(apiMessage(payload, t("att.punchFailed")), "error");
         return;
       }
       pendingIdempotencyKey.current = null;
@@ -315,7 +315,7 @@ export function EmployeeTimeClock({
           : t("att.exitOk"),
       );
     } catch {
-      flash(t("att.networkRetry"));
+      flash(t("att.networkRetry"), "error");
     } finally {
       setBusy(false);
     }
@@ -641,7 +641,7 @@ export function AdminAttendance({
 }: {
   employees: Employee[];
   departments: Department[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   focusCorrectionId?: string | null;
   onNoticeFocusHandled?: () => void;
 }) {
@@ -1598,7 +1598,7 @@ export function AttendanceScheduleSettings({
   flash,
 }: {
   employees: Employee[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const t = useT();
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);

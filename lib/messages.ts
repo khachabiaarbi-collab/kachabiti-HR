@@ -99,6 +99,8 @@ export const en = {
   "search.noRequests": "No matching requests",
   "search.requestMeta": "{name} · {status}",
   "notices.title": "Notifications",
+  "notices.loadMore": "Show older notifications",
+  "notices.loading": "Loading…",
   "notices.markUnread": "Mark as unread",
   "notices.markAllRead": "Mark all as read",
   "notices.empty": "No notifications yet",
@@ -727,6 +729,7 @@ export const en = {
   "confirm.please": "Please confirm",
 
   "toast.leaveSubmitted": "Leave request submitted for approval",
+  "toast.dismiss": "Dismiss",
   "toast.authzSubmitted": "Authorization submitted for approval",
   "toast.eventAdded": "Company event added to calendar",
   "toast.departmentAdded": "Department added successfully",
@@ -989,6 +992,8 @@ export const fr: Record<keyof typeof en, string> = {
   "search.noRequests": "Aucune demande correspondante",
   "search.requestMeta": "{name} · {status}",
   "notices.title": "Notifications",
+  "notices.loadMore": "Voir les notifications plus anciennes",
+  "notices.loading": "Chargement…",
   "notices.markUnread": "Marquer comme non lu",
   "notices.markAllRead": "Tout marquer comme lu",
   "notices.empty": "Aucune notification",
@@ -1619,6 +1624,7 @@ export const fr: Record<keyof typeof en, string> = {
   "confirm.please": "Veuillez confirmer",
 
   "toast.leaveSubmitted": "Demande de congé envoyée pour validation",
+  "toast.dismiss": "Fermer",
   "toast.authzSubmitted": "Autorisation envoyée pour validation",
   "toast.eventAdded": "Événement ajouté au calendrier",
   "toast.departmentAdded": "Département ajouté",

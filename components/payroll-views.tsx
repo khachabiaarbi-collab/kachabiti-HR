@@ -96,10 +96,10 @@ import {
 import { createClient } from "@/lib/supabase/client";
 
 /** `flash` from the page shell changes every render; keep effects off it. */
-function useStableFlash(flash: (message: string) => void) {
+function useStableFlash(flash: (message: string, tone?: "success" | "error") => void) {
   const ref = useRef(flash);
   ref.current = flash;
-  return useCallback((message: string) => ref.current(message), []);
+  return useCallback((message: string, tone?: "success" | "error") => ref.current(message, tone), []);
 }
 
 type ContractForm = {
@@ -149,7 +149,7 @@ export function ContractSection({
   flash,
 }: {
   employeeId: string;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const { t, dateLocale } = useLanguage();
   const today = isoDate(new Date());
@@ -172,7 +172,7 @@ export function ContractSection({
       if (cancelled) return;
       if (error) {
         setState(isMissingPayrollTable(error.message) ? "missing" : "ready");
-        if (!isMissingPayrollTable(error.message)) flash(error.message);
+        if (!isMissingPayrollTable(error.message)) flash(error.message, "error");
         return;
       }
       const rows = ((data ?? []) as EmployeeContractRow[]).map(mapContract);
@@ -194,19 +194,19 @@ export function ContractSection({
     const children = Number.parseInt(form.dependentChildren, 10);
     const rib = form.rib.replace(/\s+/g, "");
 
-    if (!form.effectiveFrom) return flash(t("contract.errorEffective"));
-    if (form.payBasis === "monthly" && !baseSalary) return flash(t("contract.errorSalary"));
-    if (form.payBasis === "hourly" && !hourlyRate) return flash(t("contract.errorHourly"));
-    if (!weeklyHours || weeklyHours > 60) return flash(t("contract.errorHours"));
+    if (!form.effectiveFrom) return flash(t("contract.errorEffective"), "error");
+    if (form.payBasis === "monthly" && !baseSalary) return flash(t("contract.errorSalary"), "error");
+    if (form.payBasis === "hourly" && !hourlyRate) return flash(t("contract.errorHourly"), "error");
+    if (!weeklyHours || weeklyHours > 60) return flash(t("contract.errorHours"), "error");
     if (!Number.isInteger(children) || children < 0 || children > 20) {
-      return flash(t("contract.errorChildren"));
+      return flash(t("contract.errorChildren"), "error");
     }
-    if (rib && !/^\d{20}$/.test(rib)) return flash(t("contract.errorRib"));
+    if (rib && !/^\d{20}$/.test(rib)) return flash(t("contract.errorRib"), "error");
     if (contractNeedsEnd(form.contractType) && !form.contractEnd) {
-      return flash(t("contract.errorEnd"));
+      return flash(t("contract.errorEnd"), "error");
     }
     if (form.contractEnd && form.contractEnd < form.effectiveFrom) {
-      return flash(t("contract.errorEndBefore"));
+      return flash(t("contract.errorEndBefore"), "error");
     }
 
     setSaving(true);
@@ -244,7 +244,7 @@ export function ContractSection({
     setSaving(false);
 
     if (error) {
-      flash(isMissingPayrollTable(error.message) ? t("contract.missingTable") : error.message);
+      flash(isMissingPayrollTable(error.message) ? t("contract.missingTable") : error.message, "error");
       return;
     }
     const saved = mapContract(data as EmployeeContractRow);
@@ -476,7 +476,7 @@ function FixedComponentsSection({
   flash: rawFlash,
 }: {
   employeeId: string;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const flash = useStableFlash(rawFlash);
   const { t, dateLocale } = useLanguage();
@@ -497,7 +497,7 @@ function FixedComponentsSection({
   }, [employeeId, today]);
 
   useEffect(() => {
-    reload().catch((error: Error) => flash(error.message));
+    reload().catch((error: Error) => flash(error.message, "error"));
   }, [reload, flash]);
 
   const byId = new Map(catalog.map((component) => [component.id, component]));
@@ -505,7 +505,7 @@ function FixedComponentsSection({
 
   const add = async () => {
     const value = amount(amountValue);
-    if (!componentId || !value || busy) return flash(t("payroll.errorAmount"));
+    if (!componentId || !value || busy) return flash(t("payroll.errorAmount"), "error");
     setBusy(true);
     try {
       // Applies from the 1st of the current month.
@@ -514,7 +514,7 @@ function FixedComponentsSection({
       setAmountValue("");
       await reload();
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setBusy(false);
   };
@@ -528,7 +528,7 @@ function FixedComponentsSection({
       await endEmployeeComponent(item, lastDay);
       await reload();
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setBusy(false);
   };
@@ -624,7 +624,7 @@ export function PayrollView({
   onOpenEmployee,
 }: {
   employees: Employee[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   /** Opens the employee panel (where the contract is edited). */
   onOpenEmployee?: (employee: Employee) => void;
 }) {
@@ -664,7 +664,7 @@ export function PayrollView({
       const message = (error as Error).message;
       if (isMissingPayrollTable(message)) setState("missing-table");
       else {
-        flash(message);
+        flash(message, "error");
         setState("ready");
       }
     }
@@ -718,7 +718,7 @@ export function PayrollView({
   const money = (value: number) => formatTnd(round3(value), dateLocale);
 
   const prepare = async () => {
-    if (!settings) return flash(t("payroll.noRates", { year }));
+    if (!settings) return flash(t("payroll.noRates", { year }), "error");
     if (busy) return;
     setBusy(true);
     try {
@@ -732,7 +732,7 @@ export function PayrollView({
       setContractPeriods(periods);
       flash(t("payroll.prepared"));
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setBusy(false);
   };
@@ -745,7 +745,7 @@ export function PayrollView({
       await load();
       flash(t(status === "paid" ? "payroll.markedPaid" : "payroll.validatedToast"));
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
   };
 
@@ -1105,7 +1105,7 @@ export function PayrollView({
               setConfirm(null);
               await load();
             } catch (error) {
-              flash((error as Error).message);
+              flash((error as Error).message, "error");
             }
           }}
         />
@@ -1193,7 +1193,7 @@ function PayslipPanel({
   inProgress: boolean;
   verified: boolean;
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSaved: () => Promise<void>;
 }) {
   const flash = useStableFlash(rawFlash);
@@ -1226,7 +1226,7 @@ function PayslipPanel({
     if (!editable) return;
     loadComponents()
       .then((components) => setCatalog(components.filter((component) => component.active)))
-      .catch((error: Error) => flash(error.message));
+      .catch((error: Error) => flash(error.message, "error"));
   }, [editable, flash]);
 
   const clockPay = (inputs.auto.scheduledHours ?? 0) > 0;
@@ -1242,7 +1242,7 @@ function PayslipPanel({
   const addOneOff = () => {
     const component = catalog.find((item) => item.id === componentId);
     const value = amount(amountValue);
-    if (!component || !value) return flash(t("payroll.errorAmount"));
+    if (!component || !value) return flash(t("payroll.errorAmount"), "error");
     setOneOff((current) => [...current, toPayItem(component, value)]);
     setComponentId("");
     setAmountValue("");
@@ -1253,7 +1253,7 @@ function PayslipPanel({
     const manual: Partial<PayVariables> = {};
     for (const field of fields) {
       const value = amount(values[field.key]);
-      if (value == null) return flash(t("payroll.errorNumber"));
+      if (value == null) return flash(t("payroll.errorNumber"), "error");
       if (value !== (inputs.auto[field.key] ?? 0)) manual[field.key] = value;
     }
     setSaving(true);
@@ -1262,170 +1262,173 @@ function PayslipPanel({
       await onSaved();
       flash(t("payroll.payslipSaved"));
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setSaving(false);
   };
 
   return (
-    <div className="side-panel payslip-panel">
-      <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
-        <X size={18} />
-      </button>
-      <p className="eyebrow">{monthLabel(payslip.period, dateLocale)}</p>
-      <h2>{inputs.employee.name}</h2>
-      <p>
-        {t(`contract.type.${inputs.contract.contractType}`)} ·{" "}
-        {inputs.contract.payBasis === "hourly"
-          ? `${formatTnd(inputs.contract.hourlyRate ?? 0, dateLocale)}/h`
-          : formatTnd(inputs.contract.baseSalary, dateLocale)}
-      </p>
+    <>
+      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
+      <div className="side-panel payslip-panel">
+        <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
+          <X size={18} />
+        </button>
+        <p className="eyebrow">{monthLabel(payslip.period, dateLocale)}</p>
+        <h2>{inputs.employee.name}</h2>
+        <p>
+          {t(`contract.type.${inputs.contract.contractType}`)} ·{" "}
+          {inputs.contract.payBasis === "hourly"
+            ? `${formatTnd(inputs.contract.hourlyRate ?? 0, dateLocale)}/h`
+            : formatTnd(inputs.contract.baseSalary, dateLocale)}
+        </p>
 
-      {payslip.warnings.length > 0 && (
-        <ul className="payslip-warnings">
-          {payslip.warnings.map((warning) => (
-            <li key={warning}>
-              <AlertTriangle size={13} /> {t(WARNING_KEYS[warning])}
-            </li>
-          ))}
-        </ul>
-      )}
+        {payslip.warnings.length > 0 && (
+          <ul className="payslip-warnings">
+            {payslip.warnings.map((warning) => (
+              <li key={warning}>
+                <AlertTriangle size={13} /> {t(WARNING_KEYS[warning])}
+              </li>
+            ))}
+          </ul>
+        )}
 
-      {inputs.attendance && (
-        <div className="payslip-attendance">
-          <p className="eyebrow">{t("payroll.attTitle")}</p>
-          <span className="contract-hint">
-            {t("payroll.attUntil", { date: formatDisplayDate(inputs.attendance.countedUntil, dateLocale) })}
-          </span>
-          {inputs.attendance.clock && (
-            <dl className="payslip-clock">
-              <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
-              <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
-              <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
-              {inputs.attendance.clock.notYetHours > 0 && (
-                <div><dt>{t("payroll.clockNotYet")}</dt><dd>{inputs.attendance.clock.notYetHours.toLocaleString(dateLocale)} h</dd></div>
+        {inputs.attendance && (
+          <div className="payslip-attendance">
+            <p className="eyebrow">{t("payroll.attTitle")}</p>
+            <span className="contract-hint">
+              {t("payroll.attUntil", { date: formatDisplayDate(inputs.attendance.countedUntil, dateLocale) })}
+            </span>
+            {inputs.attendance.clock && (
+              <dl className="payslip-clock">
+                <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
+                {inputs.attendance.clock.notYetHours > 0 && (
+                  <div><dt>{t("payroll.clockNotYet")}</dt><dd>{inputs.attendance.clock.notYetHours.toLocaleString(dateLocale)} h</dd></div>
+                )}
+                <div><dt>{t("payroll.clockOvertime")}</dt><dd>{inputs.attendance.clock.overtimeHours.toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockLate")}</dt><dd className={inputs.attendance.clock.lateCount ? "is-negative" : undefined}>{inputs.attendance.clock.lateCount}</dd></div>
+                <div><dt>{t("payroll.clockEarly")}</dt><dd className={inputs.attendance.clock.earlyLeaveCount ? "is-negative" : undefined}>{inputs.attendance.clock.earlyLeaveCount}</dd></div>
+                <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.clock.absentDays ? "is-negative" : undefined}>{inputs.attendance.clock.absentDays}</dd></div>
+              </dl>
+            )}
+            {inputs.attendance.clock && <span className="contract-hint">{t("payroll.clockRule")}</span>}
+            <dl hidden={Boolean(inputs.attendance.clock)}>
+              <div><dt>{t("payroll.attScheduled")}</dt><dd>{inputs.attendance.scheduledDays}</dd></div>
+              <div><dt>{t("payroll.attWorked")}</dt><dd>{inputs.attendance.workedDays}</dd></div>
+              <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.absentDays ? "is-negative" : undefined}>{inputs.attendance.absentDays}</dd></div>
+              <div><dt>{t("payroll.attMissing")}</dt><dd>{inputs.attendance.missingHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.attLeave")}</dt><dd>{inputs.attendance.paidLeaveDays} / {inputs.attendance.unpaidDays}</dd></div>
+              <div><dt>{t("payroll.attHolidays")}</dt><dd>{inputs.attendance.holidayDays}</dd></div>
+              <div><dt>{t("payroll.attOutside")}</dt><dd>{inputs.attendance.outsideContractDays}</dd></div>
+              <div><dt>{t("payroll.attHours")}</dt><dd>{inputs.attendance.workedHours.toLocaleString(dateLocale)} h</dd></div>
+              {inputs.auto.earnedHours != null && (
+                <div>
+                  <dt>{t("payroll.attEarned")}</dt>
+                  <dd>{(inputs.attendance.earnedHours ?? 0).toLocaleString(dateLocale)} h</dd>
+                </div>
               )}
-              <div><dt>{t("payroll.clockOvertime")}</dt><dd>{inputs.attendance.clock.overtimeHours.toLocaleString(dateLocale)} h</dd></div>
-              <div><dt>{t("payroll.clockLate")}</dt><dd className={inputs.attendance.clock.lateCount ? "is-negative" : undefined}>{inputs.attendance.clock.lateCount}</dd></div>
-              <div><dt>{t("payroll.clockEarly")}</dt><dd className={inputs.attendance.clock.earlyLeaveCount ? "is-negative" : undefined}>{inputs.attendance.clock.earlyLeaveCount}</dd></div>
-              <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.clock.absentDays ? "is-negative" : undefined}>{inputs.attendance.clock.absentDays}</dd></div>
             </dl>
-          )}
-          {inputs.attendance.clock && <span className="contract-hint">{t("payroll.clockRule")}</span>}
-          <dl hidden={Boolean(inputs.attendance.clock)}>
-            <div><dt>{t("payroll.attScheduled")}</dt><dd>{inputs.attendance.scheduledDays}</dd></div>
-            <div><dt>{t("payroll.attWorked")}</dt><dd>{inputs.attendance.workedDays}</dd></div>
-            <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.absentDays ? "is-negative" : undefined}>{inputs.attendance.absentDays}</dd></div>
-            <div><dt>{t("payroll.attMissing")}</dt><dd>{inputs.attendance.missingHours.toLocaleString(dateLocale)} h</dd></div>
-            <div><dt>{t("payroll.attLeave")}</dt><dd>{inputs.attendance.paidLeaveDays} / {inputs.attendance.unpaidDays}</dd></div>
-            <div><dt>{t("payroll.attHolidays")}</dt><dd>{inputs.attendance.holidayDays}</dd></div>
-            <div><dt>{t("payroll.attOutside")}</dt><dd>{inputs.attendance.outsideContractDays}</dd></div>
-            <div><dt>{t("payroll.attHours")}</dt><dd>{inputs.attendance.workedHours.toLocaleString(dateLocale)} h</dd></div>
-            {inputs.auto.earnedHours != null && (
-              <div>
-                <dt>{t("payroll.attEarned")}</dt>
-                <dd>{(inputs.attendance.earnedHours ?? 0).toLocaleString(dateLocale)} h</dd>
+          </div>
+        )}
+        {isExemptContract(inputs.contract.contractType) && (
+          <p className="contract-hint payslip-exempt">{t("contract.sivpExempt")}</p>
+        )}
+
+        <PayslipLines payslip={payslip} />
+        <PaySimulator payslip={payslip} />
+        <button
+          type="button"
+          className="secondary-button payslip-view-button"
+          onClick={() => setShowDocument(true)}
+          disabled={inProgress}
+          title={inProgress ? t("payroll.validateAfterMonth") : undefined}
+        >
+          <Printer size={15} /> {t("payslip.view")}
+        </button>
+        {showDocument && <PayslipDocument payslips={[payslip]} onClose={() => setShowDocument(false)} />}
+
+        {editable && (
+          <div className="detail-block">
+            <p className="eyebrow">{t("payroll.adjustTitle")}</p>
+            <span className="contract-hint">{t("payroll.adjustNote")}</span>
+            {fields.map((field) => (
+              <label className="form-label" key={field.key}>
+                {t(field.label)}
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={values[field.key]}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, [field.key]: event.target.value }))
+                  }
+                />
+                <small className="contract-hint">
+                  {t("payroll.autoValue", { value: String(inputs.auto[field.key] ?? 0) })}
+                </small>
+              </label>
+            ))}
+
+            <p className="eyebrow contract-subhead">{t("payroll.oneOffTitle")}</p>
+            {oneOff.length === 0 ? (
+              <span className="contract-hint">{t("payroll.oneOffEmpty")}</span>
+            ) : (
+              <div className="pay-item-list">
+                {oneOff.map((item, index) => (
+                  <div className="pay-item" key={`${item.code}-${index}`}>
+                    <div>
+                      <b>{item.label}</b>
+                      <span>{t(item.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}</span>
+                    </div>
+                    <strong>{formatTnd(item.amount, dateLocale)}</strong>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={t("common.delete")}
+                      onClick={() => setOneOff((current) => current.filter((_, i) => i !== index))}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
-          </dl>
-        </div>
-      )}
-      {isExemptContract(inputs.contract.contractType) && (
-        <p className="contract-hint payslip-exempt">{t("contract.sivpExempt")}</p>
-      )}
-
-      <PayslipLines payslip={payslip} />
-      <PaySimulator payslip={payslip} />
-      <button
-        type="button"
-        className="secondary-button payslip-view-button"
-        onClick={() => setShowDocument(true)}
-        disabled={inProgress}
-        title={inProgress ? t("payroll.validateAfterMonth") : undefined}
-      >
-        <Printer size={15} /> {t("payslip.view")}
-      </button>
-      {showDocument && <PayslipDocument payslips={[payslip]} onClose={() => setShowDocument(false)} />}
-
-      {editable && (
-        <div className="detail-block">
-          <p className="eyebrow">{t("payroll.adjustTitle")}</p>
-          <span className="contract-hint">{t("payroll.adjustNote")}</span>
-          {fields.map((field) => (
-            <label className="form-label" key={field.key}>
-              {t(field.label)}
+            <div className="pay-item-add">
+              <select
+                aria-label={t("payroll.component")}
+                value={componentId}
+                onChange={(event) => setComponentId(event.target.value)}
+              >
+                <option value="">{t("payroll.chooseComponent")}</option>
+                {catalog.map((component) => (
+                  <option key={component.id} value={component.id}>
+                    {component.name}
+                  </option>
+                ))}
+              </select>
               <input
                 type="number"
-                step="0.5"
+                step="0.001"
                 min="0"
-                value={values[field.key]}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, [field.key]: event.target.value }))
-                }
+                aria-label={t("payroll.amount")}
+                placeholder={t("payroll.amount")}
+                value={amountValue}
+                onChange={(event) => setAmountValue(event.target.value)}
               />
-              <small className="contract-hint">
-                {t("payroll.autoValue", { value: String(inputs.auto[field.key] ?? 0) })}
-              </small>
-            </label>
-          ))}
-
-          <p className="eyebrow contract-subhead">{t("payroll.oneOffTitle")}</p>
-          {oneOff.length === 0 ? (
-            <span className="contract-hint">{t("payroll.oneOffEmpty")}</span>
-          ) : (
-            <div className="pay-item-list">
-              {oneOff.map((item, index) => (
-                <div className="pay-item" key={`${item.code}-${index}`}>
-                  <div>
-                    <b>{item.label}</b>
-                    <span>{t(item.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}</span>
-                  </div>
-                  <strong>{formatTnd(item.amount, dateLocale)}</strong>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={t("common.delete")}
-                    onClick={() => setOneOff((current) => current.filter((_, i) => i !== index))}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
+              <button type="button" className="secondary-button" onClick={addOneOff}>
+                <Plus size={14} /> {t("payroll.add")}
+              </button>
             </div>
-          )}
-          <div className="pay-item-add">
-            <select
-              aria-label={t("payroll.component")}
-              value={componentId}
-              onChange={(event) => setComponentId(event.target.value)}
-            >
-              <option value="">{t("payroll.chooseComponent")}</option>
-              {catalog.map((component) => (
-                <option key={component.id} value={component.id}>
-                  {component.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              step="0.001"
-              min="0"
-              aria-label={t("payroll.amount")}
-              placeholder={t("payroll.amount")}
-              value={amountValue}
-              onChange={(event) => setAmountValue(event.target.value)}
-            />
-            <button type="button" className="secondary-button" onClick={addOneOff}>
-              <Plus size={14} /> {t("payroll.add")}
-            </button>
-          </div>
 
-          <Button onClick={() => void save()}>
-            {saving ? t("modal.saving") : t("payroll.saveAndRecalculate")}
-          </Button>
-        </div>
-      )}
-    </div>
+            <Button onClick={() => void save()}>
+              {saving ? t("modal.saving") : t("payroll.saveAndRecalculate")}
+            </Button>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1469,7 +1472,7 @@ function RatesPanel({
   year: number;
   initial: PayrollSettings | null;
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSaved: () => Promise<void>;
 }) {
   const flash = useStableFlash(rawFlash);
@@ -1503,10 +1506,10 @@ function RatesPanel({
   }, []);
 
   useEffect(() => {
-    reloadComponents().catch((error: Error) => flash(error.message));
+    reloadComponents().catch((error: Error) => flash(error.message, "error"));
     loadCompany()
       .then(setCompany)
-      .catch((error: Error) => flash(error.message));
+      .catch((error: Error) => flash(error.message, "error"));
   }, [reloadComponents, flash]);
 
   const saveCompanyDetails = async () => {
@@ -1515,7 +1518,7 @@ function RatesPanel({
       await saveCompany(company);
       flash(t("payslip.companySaved"));
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
   };
 
@@ -1524,7 +1527,7 @@ function RatesPanel({
     const parsed: Partial<Record<RateKey | AmountKey, number>> = {};
     for (const key of Object.keys(rates) as (RateKey | AmountKey)[]) {
       const value = amount(rates[key]);
-      if (value == null) return flash(t("payroll.errorNumber"));
+      if (value == null) return flash(t("payroll.errorNumber"), "error");
       parsed[key] = value;
     }
     const nextBrackets: IrppBracket[] = [];
@@ -1532,9 +1535,9 @@ function RatesPanel({
       const rate = amount(bracket.rate);
       const last = index === brackets.length - 1;
       const upTo = last ? null : amount(bracket.upTo);
-      if (rate == null || (!last && !upTo)) return flash(t("payroll.errorBrackets"));
+      if (rate == null || (!last && !upTo)) return flash(t("payroll.errorBrackets"), "error");
       if (upTo != null && nextBrackets.length && upTo <= (nextBrackets[nextBrackets.length - 1].upTo ?? 0)) {
-        return flash(t("payroll.errorBrackets"));
+        return flash(t("payroll.errorBrackets"), "error");
       }
       nextBrackets.push({ upTo, rate: rate / 100 });
     }
@@ -1558,7 +1561,7 @@ function RatesPanel({
       await onSaved();
       flash(t("payroll.ratesSaved"));
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setSaving(false);
   };
@@ -1586,7 +1589,7 @@ function RatesPanel({
       setDraft({ name: "", kind: "earning", subjectToCnss: true, taxable: true });
       await reloadComponents();
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
   };
 
@@ -1595,7 +1598,7 @@ function RatesPanel({
       await saveComponent({ ...component, active: !component.active });
       await reloadComponents();
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
   };
 
@@ -1603,213 +1606,216 @@ function RatesPanel({
     setRates((current) => ({ ...current, [key]: value }));
 
   return (
-    <div className="side-panel rates-panel">
-      <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
-        <X size={18} />
-      </button>
-      <p className="eyebrow">{t("payroll.ratesEyebrow")}</p>
-      <h2>{t("payroll.ratesTitle", { year })}</h2>
-      <p>{t("payroll.ratesNote")}</p>
+    <>
+      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
+      <div className="side-panel rates-panel">
+        <button type="button" className="panel-close" onClick={close} aria-label={t("chrome.closeMenu")}>
+          <X size={18} />
+        </button>
+        <p className="eyebrow">{t("payroll.ratesEyebrow")}</p>
+        <h2>{t("payroll.ratesTitle", { year })}</h2>
+        <p>{t("payroll.ratesNote")}</p>
 
-      <div className="detail-block">
-        <p className="eyebrow">{t("payroll.ratesContributions")}</p>
-        {PERCENT_FIELDS.map((field) => (
+        <div className="detail-block">
+          <p className="eyebrow">{t("payroll.ratesContributions")}</p>
+          {PERCENT_FIELDS.map((field) => (
+            <Field
+              key={field.key}
+              label={`${t(field.label)} (%)`}
+              type="number"
+              step="0.001"
+              min="0"
+              value={rates[field.key]}
+              onChange={(value) => setRate(field.key, value)}
+            />
+          ))}
           <Field
-            key={field.key}
-            label={`${t(field.label)} (%)`}
+            label={`${t("payroll.rate.overtime")} (%)`}
             type="number"
-            step="0.001"
-            min="0"
-            value={rates[field.key]}
-            onChange={(value) => setRate(field.key, value)}
+            step="1"
+            min="100"
+            value={rates.overtimeRate}
+            onChange={(value) => setRate("overtimeRate", value)}
           />
-        ))}
-        <Field
-          label={`${t("payroll.rate.overtime")} (%)`}
-          type="number"
-          step="1"
-          min="100"
-          value={rates.overtimeRate}
-          onChange={(value) => setRate("overtimeRate", value)}
-        />
-        {AMOUNT_FIELDS.map((field) => (
-          <Field
-            key={field.key}
-            label={t(field.label)}
-            type="number"
-            step={field.key === "maxChildren" ? "1" : "0.001"}
-            min="0"
-            value={rates[field.key]}
-            onChange={(value) => setRate(field.key, value)}
-          />
-        ))}
-      </div>
+          {AMOUNT_FIELDS.map((field) => (
+            <Field
+              key={field.key}
+              label={t(field.label)}
+              type="number"
+              step={field.key === "maxChildren" ? "1" : "0.001"}
+              min="0"
+              value={rates[field.key]}
+              onChange={(value) => setRate(field.key, value)}
+            />
+          ))}
+        </div>
 
-      <div className="detail-block">
-        <p className="eyebrow">{t("payroll.ratesBrackets")}</p>
-        <span className="contract-hint">{t("payroll.ratesBracketsNote")}</span>
-        {brackets.map((bracket, index) => {
-          const last = index === brackets.length - 1;
-          return (
-            <div className="bracket-row" key={index}>
-              <label>
-                <span>{t("payroll.upTo")}</span>
-                {last ? (
-                  <input value="∞" readOnly aria-label={t("payroll.upTo")} />
-                ) : (
+        <div className="detail-block">
+          <p className="eyebrow">{t("payroll.ratesBrackets")}</p>
+          <span className="contract-hint">{t("payroll.ratesBracketsNote")}</span>
+          {brackets.map((bracket, index) => {
+            const last = index === brackets.length - 1;
+            return (
+              <div className="bracket-row" key={index}>
+                <label>
+                  <span>{t("payroll.upTo")}</span>
+                  {last ? (
+                    <input value="∞" readOnly aria-label={t("payroll.upTo")} />
+                  ) : (
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={bracket.upTo}
+                      onChange={(event) =>
+                        setBrackets((current) =>
+                          current.map((item, i) => (i === index ? { ...item, upTo: event.target.value } : item)),
+                        )
+                      }
+                    />
+                  )}
+                </label>
+                <label>
+                  <span>%</span>
                   <input
                     type="number"
-                    step="1"
+                    step="0.5"
                     min="0"
-                    value={bracket.upTo}
+                    max="100"
+                    value={bracket.rate}
                     onChange={(event) =>
                       setBrackets((current) =>
-                        current.map((item, i) => (i === index ? { ...item, upTo: event.target.value } : item)),
+                        current.map((item, i) => (i === index ? { ...item, rate: event.target.value } : item)),
                       )
                     }
                   />
-                )}
-              </label>
-              <label>
-                <span>%</span>
-                <input
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  max="100"
-                  value={bracket.rate}
-                  onChange={(event) =>
-                    setBrackets((current) =>
-                      current.map((item, i) => (i === index ? { ...item, rate: event.target.value } : item)),
-                    )
-                  }
-                />
-              </label>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={t("common.delete")}
-                disabled={brackets.length === 1}
-                onClick={() => setBrackets((current) => current.filter((_, i) => i !== index))}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          );
-        })}
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() =>
-            setBrackets((current) => [...current.slice(0, -1), { upTo: "", rate: "" }, ...current.slice(-1)])
-          }
-        >
-          <Plus size={14} /> {t("payroll.addBracket")}
-        </button>
-      </div>
-
-      <div className="detail-block">
-        <label className="form-check rates-verified">
-          <input type="checkbox" checked={verified} onChange={(event) => setVerified(event.target.checked)} />
-          {t("payroll.ratesVerified")}
-        </label>
-        <span className="contract-hint">{t("payroll.ratesVerifiedNote")}</span>
-        <Button onClick={() => void save()}>{saving ? t("modal.saving") : t("payroll.saveRates")}</Button>
-      </div>
-
-      {company && (
-        <div className="detail-block">
-          <p className="eyebrow">{t("payslip.companyTitle")}</p>
-          <span className="contract-hint">{t("payslip.companyNote")}</span>
-          <Field
-            label={t("payslip.companyName")}
-            value={company.name}
-            onChange={(value) => setCompany({ ...company, name: value })}
-          />
-          <Field
-            label={t("payslip.companyAddress")}
-            value={company.address ?? ""}
-            onChange={(value) => setCompany({ ...company, address: value })}
-          />
-          <Field
-            label={t("payslip.taxId")}
-            value={company.taxId ?? ""}
-            onChange={(value) => setCompany({ ...company, taxId: value })}
-          />
-          <Field
-            label={t("payslip.cnssEmployer")}
-            value={company.cnssEmployerNumber ?? ""}
-            onChange={(value) => setCompany({ ...company, cnssEmployerNumber: value })}
-          />
-          <button type="button" className="secondary-button" onClick={() => void saveCompanyDetails()}>
-            {t("payslip.saveCompany")}
-          </button>
-        </div>
-      )}
-
-      <div className="detail-block">
-        <p className="eyebrow">{t("payroll.catalogTitle")}</p>
-        <div className="pay-item-list">
-          {components.map((component) => (
-            <div className={`pay-item ${component.active ? "" : "is-inactive"}`} key={component.id}>
-              <div>
-                <b>{component.name}</b>
-                <span>
-                  {t(component.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}
-                  {component.kind === "earning" &&
-                    ` · ${component.subjectToCnss ? t("payroll.cnssYes") : t("payroll.cnssNo")} · ${
-                      component.taxable ? t("payroll.taxYes") : t("payroll.taxNo")
-                    }`}
-                </span>
+                </label>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={t("common.delete")}
+                  disabled={brackets.length === 1}
+                  onClick={() => setBrackets((current) => current.filter((_, i) => i !== index))}
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
-              <button type="button" className="secondary-button" onClick={() => void toggleComponent(component)}>
-                {component.active ? t("payroll.disable") : t("payroll.enable")}
-              </button>
-            </div>
-          ))}
-        </div>
-        <Field
-          label={t("payroll.newComponent")}
-          value={draft.name}
-          onChange={(value) => setDraft((current) => ({ ...current, name: value }))}
-        />
-        <label className="form-label">
-          {t("payroll.componentKind")}
-          <select
-            value={draft.kind}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, kind: event.target.value as PayComponent["kind"] }))
+            );
+          })}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() =>
+              setBrackets((current) => [...current.slice(0, -1), { upTo: "", rate: "" }, ...current.slice(-1)])
             }
           >
-            <option value="earning">{t("payroll.kindEarning")}</option>
-            <option value="deduction">{t("payroll.kindDeduction")}</option>
-          </select>
-        </label>
-        {draft.kind === "earning" && (
-          <>
-            <label className="form-check">
-              <input
-                type="checkbox"
-                checked={draft.subjectToCnss}
-                onChange={(event) => setDraft((current) => ({ ...current, subjectToCnss: event.target.checked }))}
-              />
-              {t("payroll.cnssYes")}
-            </label>
-            <label className="form-check">
-              <input
-                type="checkbox"
-                checked={draft.taxable}
-                onChange={(event) => setDraft((current) => ({ ...current, taxable: event.target.checked }))}
-              />
-              {t("payroll.taxYes")}
-            </label>
-          </>
+            <Plus size={14} /> {t("payroll.addBracket")}
+          </button>
+        </div>
+
+        <div className="detail-block">
+          <label className="form-check rates-verified">
+            <input type="checkbox" checked={verified} onChange={(event) => setVerified(event.target.checked)} />
+            {t("payroll.ratesVerified")}
+          </label>
+          <span className="contract-hint">{t("payroll.ratesVerifiedNote")}</span>
+          <Button onClick={() => void save()}>{saving ? t("modal.saving") : t("payroll.saveRates")}</Button>
+        </div>
+
+        {company && (
+          <div className="detail-block">
+            <p className="eyebrow">{t("payslip.companyTitle")}</p>
+            <span className="contract-hint">{t("payslip.companyNote")}</span>
+            <Field
+              label={t("payslip.companyName")}
+              value={company.name}
+              onChange={(value) => setCompany({ ...company, name: value })}
+            />
+            <Field
+              label={t("payslip.companyAddress")}
+              value={company.address ?? ""}
+              onChange={(value) => setCompany({ ...company, address: value })}
+            />
+            <Field
+              label={t("payslip.taxId")}
+              value={company.taxId ?? ""}
+              onChange={(value) => setCompany({ ...company, taxId: value })}
+            />
+            <Field
+              label={t("payslip.cnssEmployer")}
+              value={company.cnssEmployerNumber ?? ""}
+              onChange={(value) => setCompany({ ...company, cnssEmployerNumber: value })}
+            />
+            <button type="button" className="secondary-button" onClick={() => void saveCompanyDetails()}>
+              {t("payslip.saveCompany")}
+            </button>
+          </div>
         )}
-        <button type="button" className="secondary-button" onClick={() => void addComponent()}>
-          <Plus size={14} /> {t("payroll.addComponent")}
-        </button>
+
+        <div className="detail-block">
+          <p className="eyebrow">{t("payroll.catalogTitle")}</p>
+          <div className="pay-item-list">
+            {components.map((component) => (
+              <div className={`pay-item ${component.active ? "" : "is-inactive"}`} key={component.id}>
+                <div>
+                  <b>{component.name}</b>
+                  <span>
+                    {t(component.kind === "deduction" ? "payroll.kindDeduction" : "payroll.kindEarning")}
+                    {component.kind === "earning" &&
+                      ` · ${component.subjectToCnss ? t("payroll.cnssYes") : t("payroll.cnssNo")} · ${
+                        component.taxable ? t("payroll.taxYes") : t("payroll.taxNo")
+                      }`}
+                  </span>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => void toggleComponent(component)}>
+                  {component.active ? t("payroll.disable") : t("payroll.enable")}
+                </button>
+              </div>
+            ))}
+          </div>
+          <Field
+            label={t("payroll.newComponent")}
+            value={draft.name}
+            onChange={(value) => setDraft((current) => ({ ...current, name: value }))}
+          />
+          <label className="form-label">
+            {t("payroll.componentKind")}
+            <select
+              value={draft.kind}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, kind: event.target.value as PayComponent["kind"] }))
+              }
+            >
+              <option value="earning">{t("payroll.kindEarning")}</option>
+              <option value="deduction">{t("payroll.kindDeduction")}</option>
+            </select>
+          </label>
+          {draft.kind === "earning" && (
+            <>
+              <label className="form-check">
+                <input
+                  type="checkbox"
+                  checked={draft.subjectToCnss}
+                  onChange={(event) => setDraft((current) => ({ ...current, subjectToCnss: event.target.checked }))}
+                />
+                {t("payroll.cnssYes")}
+              </label>
+              <label className="form-check">
+                <input
+                  type="checkbox"
+                  checked={draft.taxable}
+                  onChange={(event) => setDraft((current) => ({ ...current, taxable: event.target.checked }))}
+                />
+                {t("payroll.taxYes")}
+              </label>
+            </>
+          )}
+          <button type="button" className="secondary-button" onClick={() => void addComponent()}>
+            <Plus size={14} /> {t("payroll.addComponent")}
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1868,7 +1874,16 @@ export function PayslipDocument({ payslips, onClose }: { payslips: Payslip[]; on
 
   // Rendered on <body> so printing can hide the rest of the app entirely.
   return createPortal(
-    <div className="payslip-overlay" role="dialog" aria-modal="true" aria-label={t("payslip.view")}>
+    <div
+      className="payslip-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("payslip.view")}
+      onMouseDown={(event) => {
+        // A press on the grey area around the payslip closes it.
+        if (event.target === event.currentTarget) closeRef.current();
+      }}
+    >
       <div className="payslip-toolbar">
         <span>
           {payslips.length > 1 ? t("payslip.countHint", { count: payslips.length }) + " " : ""}
@@ -2044,7 +2059,7 @@ export function MyPayslips({
   flash: rawFlash,
 }: {
   employeeId: string | null | undefined;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const flash = useStableFlash(rawFlash);
   const { t, dateLocale } = useLanguage();
@@ -2061,7 +2076,7 @@ export function MyPayslips({
       .catch((error: Error) => {
         if (cancelled) return;
         // Payroll not set up yet: show the empty state, not an error.
-        if (!isMissingPayrollTable(error.message)) flash(error.message);
+        if (!isMissingPayrollTable(error.message)) flash(error.message, "error");
         setPayslips([]);
       });
     return () => {
@@ -2126,7 +2141,7 @@ function PayrollExports({
   period: string;
   run: PayrollRun;
   payslips: Payslip[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onPrintAll: () => void;
   inProgress: boolean;
 }) {
@@ -2139,10 +2154,10 @@ function PayrollExports({
   const noRib = missingRib(payslips);
 
   const exportBank = () => {
-    if (!published) return flash(t("export.validateFirst"));
+    if (!published) return flash(t("export.validateFirst"), "error");
     downloadCsv(`virements-${period}.csv`, bankTransferCsv(payslips, `Salaire ${period}`));
     if (noRib.length) {
-      flash(t("export.missingRib", { names: noRib.map((item) => item.inputs.employee.name).join(", ") }));
+      flash(t("export.missingRib", { names: noRib.map((item) => item.inputs.employee.name).join(", ") }), "error");
     }
   };
 
@@ -2161,14 +2176,14 @@ function PayrollExports({
       const to = kind === "quarter" ? monthRange(months[2]).to : `${year}-12-31`;
       const rows = await loadPublishedPayslips(from, to);
       if (!rows.length) {
-        flash(t("export.nothingValidated"));
+        flash(t("export.nothingValidated"), "error");
       } else if (kind === "quarter") {
         downloadCsv(`cnss-${year}-T${quarter}.csv`, cnssQuarterCsv(rows, period));
       } else {
         downloadCsv(`retenues-${year}.csv`, annualTaxCsv(rows, year));
       }
     } catch (error) {
-      flash((error as Error).message);
+      flash((error as Error).message, "error");
     }
     setBusy(null);
   };
