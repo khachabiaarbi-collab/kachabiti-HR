@@ -509,3 +509,29 @@ test("clock month: an open session today is not an early departure", () => {
   assert.equal(month.earlyLeaveCount, 0);
   assert.equal(month.absenceHours, 0);
 });
+
+import { simulatePay } from "./payroll-calc";
+
+test("simulation: 10 days (80 h) of a 1500 TND CDI in a 200 h month", () => {
+  const result = simulatePay({ ...monthly(1500), contractType: "cdi" }, rates2026, 80, 200);
+  assert.equal(result.hourValue, 7.5);
+  assert.equal(result.gross, 600);
+  assert.equal(result.cnssEmployee, 55.08);
+  assert.ok(result.net < result.gross);
+});
+
+test("simulation: SIVP keeps the whole gross", () => {
+  const result = simulatePay({ ...monthly(800), contractType: "sivp" }, rates2026, 80, 200);
+  assert.equal(result.gross, 320);
+  assert.equal(result.net, 320);
+});
+
+test("simulation: never pays more than the monthly salary", () => {
+  const result = simulatePay(monthly(1500), rates2026, 260, 200);
+  assert.equal(result.gross, 1500);
+});
+
+test("simulation: hourly contract", () => {
+  const result = simulatePay({ ...monthly(0), payBasis: "hourly", hourlyRate: 7 }, rates2026, 80, 0);
+  assert.equal(result.gross, 560);
+});

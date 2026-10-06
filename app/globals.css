@@ -4737,3 +4737,44 @@ button.attendance-report-row:hover {
 .payslip-attendance .payslip-clock + .contract-hint {
   margin-top: 6px;
 }
+
+/* "How much for N days?" */
+.pay-simulator-input {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 8px;
+}
+.pay-simulator-input input,
+.pay-simulator-input select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 13px;
+}
+.pay-simulator dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  font-size: 12px;
+}
+.pay-simulator dl > div {
+  display: contents;
+}
+.pay-simulator dt {
+  color: #6b7280;
+}
+.pay-simulator dd {
+  color: #111827;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pay-simulator .is-net dt,
+.pay-simulator .is-net dd {
+  color: #1f3a8a;
+  font-size: 14px;
+  font-weight: 700;
+}

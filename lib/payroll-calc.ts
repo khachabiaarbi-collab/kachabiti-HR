@@ -847,3 +847,45 @@ export function creditDay(
 
   return { creditedMinutes, overtimeMinutes, lateCount, earlyLeaveCount };
 }
+
+// ---------------------------------------------------------------------------
+// Simulation: what N hours of work are worth (estimate, outside the time clock)
+// ---------------------------------------------------------------------------
+
+/** Hours in a simulated working day. */
+export const SIMULATION_DAY_HOURS = 8;
+
+/**
+ * Pay for `hours` worked in a month of `scheduledHours`, with the same
+ * contributions and tax as a real payslip (SIVP exemption included). Hours
+ * beyond the schedule are not paid (no overtime in a simulation).
+ */
+export function simulatePay(
+  contract: PayContract,
+  rates: PayrollRates,
+  hours: number,
+  scheduledHours: number,
+  items: PayItem[] = [],
+): PayResult & { hourValue: number } {
+  const worked = Math.max(0, hours);
+  const empty: PayVariables = {
+    workedHours: 0,
+    unpaidDays: 0,
+    outsideContractDays: 0,
+    absentDays: 0,
+    absenceHours: 0,
+    overtimeHours: 0,
+  };
+  if (contract.payBasis === "hourly") {
+    const result = calculatePayslip(contract, rates, { ...empty, workedHours: worked }, items);
+    return { ...result, hourValue: round3(contract.hourlyRate ?? 0) };
+  }
+  const scheduled = scheduledHours > 0 ? scheduledHours : monthlyHours(contract.weeklyHours);
+  const result = calculatePayslip(
+    contract,
+    rates,
+    { ...empty, scheduledHours: scheduled, notYetHours: Math.max(0, scheduled - worked) },
+    items,
+  );
+  return { ...result, hourValue: round3(contract.baseSalary / scheduled) };
+}

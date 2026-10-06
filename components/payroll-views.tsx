@@ -40,8 +40,10 @@ import {
   type PayBasis,
 } from "@/lib/payroll";
 import {
+  SIMULATION_DAY_HOURS,
   amountInFrenchWords,
   isExemptContract,
+  simulatePay,
   round3,
   type IrppBracket,
   type PayItem,
@@ -1333,6 +1335,7 @@ function PayslipPanel({
       )}
 
       <PayslipLines payslip={payslip} />
+      <PaySimulator payslip={payslip} />
       <button
         type="button"
         className="secondary-button payslip-view-button"
@@ -2225,5 +2228,55 @@ function PayrollExports({
         </button>
       </div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "How much for N days?" — estimate from the contract, outside the time clock
+// ---------------------------------------------------------------------------
+
+function PaySimulator({ payslip }: { payslip: Payslip }) {
+  const { t, dateLocale } = useLanguage();
+  const [value, setValue] = useState("10");
+  const [unit, setUnit] = useState<"days" | "hours">("days");
+  const { contract, rates, auto } = payslip.inputs;
+  const quantity = Math.max(0, Number(value.replace(",", ".")) || 0);
+  const hours = unit === "days" ? quantity * SIMULATION_DAY_HOURS : quantity;
+  const scheduled = auto.scheduledHours ?? 0;
+  const result = simulatePay(contract, rates, hours, scheduled);
+  const money = (amount: number) => formatTnd(amount, dateLocale);
+
+  return (
+    <div className="detail-block pay-simulator">
+      <p className="eyebrow">{t("payroll.simTitle")}</p>
+      <span className="contract-hint">{t("payroll.simNote", { hours: SIMULATION_DAY_HOURS })}</span>
+      <div className="pay-simulator-input">
+        <input
+          id={`sim-${payslip.id}`}
+          type="number"
+          min="0"
+          step={unit === "days" ? "0.5" : "0.25"}
+          value={value}
+          aria-label={t("payroll.simQuantity")}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        <select
+          aria-label={t("payroll.simUnit")}
+          value={unit}
+          onChange={(event) => setUnit(event.target.value as "days" | "hours")}
+        >
+          <option value="days">{t("payroll.simDays")}</option>
+          <option value="hours">{t("payroll.simHours")}</option>
+        </select>
+      </div>
+      <dl>
+        <div><dt>{t("payroll.simHourValue")}</dt><dd>{money(result.hourValue)}</dd></div>
+        <div><dt>{t("payroll.simDayValue", { hours: SIMULATION_DAY_HOURS })}</dt><dd>{money(round3(result.hourValue * SIMULATION_DAY_HOURS))}</dd></div>
+        <div><dt>{t("payroll.gross")}</dt><dd>{money(result.gross)}</dd></div>
+        <div><dt>{t("payroll.cnss")}</dt><dd>{money(result.cnssEmployee)}</dd></div>
+        <div><dt>{t("payroll.tax")}</dt><dd>{money(round3(result.irpp + result.css))}</dd></div>
+        <div className="is-net"><dt>{t("payroll.net")}</dt><dd>{money(result.net)}</dd></div>
+      </dl>
+    </div>
   );
 }
