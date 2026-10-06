@@ -40,7 +40,10 @@ import {
   type PayBasis,
 } from "@/lib/payroll";
 import {
+  SIMULATION_DAY_HOURS,
   amountInFrenchWords,
+  isExemptContract,
+  simulatePay,
   round3,
   type IrppBracket,
   type PayItem,
@@ -52,6 +55,7 @@ import {
   effectiveVariables,
   endEmployeeComponent,
   exclusionReason,
+  isMonthInProgress,
   loadCompany,
   loadComponents,
   loadContractPeriods,
@@ -109,6 +113,7 @@ type ContractForm = {
   cnssNumber: string;
   maritalStatus: MaritalStatus;
   headOfFamily: boolean;
+  attendanceBased: boolean;
   dependentChildren: string;
   bankName: string;
   rib: string;
@@ -129,6 +134,7 @@ function formFromContract(contract: EmployeeContract | null, today: string): Con
     dependentChildren: String(contract?.dependentChildren ?? 0),
     bankName: contract?.bankName ?? "",
     rib: contract?.rib ?? "",
+    attendanceBased: contract?.attendanceBased ?? true,
   };
 }
 
@@ -221,12 +227,14 @@ export function ContractSection({
           base_salary: baseSalary ?? 0,
           hourly_rate: hourlyRate,
           weekly_hours: weeklyHours,
-          cnss_number: form.cnssNumber.trim() || null,
+          // SIVP is not affiliated to CNSS through this payroll.
+          cnss_number: isExemptContract(form.contractType) ? null : form.cnssNumber.trim() || null,
           marital_status: form.maritalStatus,
           head_of_family: form.headOfFamily,
           dependent_children: children,
           bank_name: form.bankName.trim() || null,
           rib: rib || null,
+          attendance_based: form.attendanceBased,
           created_by: user?.id ?? null,
         },
         { onConflict: "employee_id,effective_from" },
@@ -372,12 +380,16 @@ export function ContractSection({
         value={form.weeklyHours}
         onChange={(value) => set("weeklyHours", value)}
       />
-      <Field
-        label={t("contract.cnssNumber")}
-        name="cnss_number"
-        value={form.cnssNumber}
-        onChange={(value) => set("cnssNumber", value)}
-      />
+      {isExemptContract(form.contractType) ? (
+        <span className="contract-hint">{t("contract.cnssNotApplicable")}</span>
+      ) : (
+        <Field
+          label={t("contract.cnssNumber")}
+          name="cnss_number"
+          value={form.cnssNumber}
+          onChange={(value) => set("cnssNumber", value)}
+        />
+      )}
 
       <p className="eyebrow contract-subhead">{t("contract.family")}</p>
       <label className="form-label">
@@ -413,6 +425,21 @@ export function ContractSection({
         value={form.dependentChildren}
         onChange={(value) => set("dependentChildren", value)}
       />
+
+      <p className="eyebrow contract-subhead">{t("contract.timeClock")}</p>
+      <label className="form-check">
+        <input
+          type="checkbox"
+          name="attendance_based"
+          checked={form.attendanceBased}
+          onChange={(event) => set("attendanceBased", event.target.checked)}
+        />
+        {t("contract.attendanceBased")}
+      </label>
+      <span className="contract-hint">
+        {form.attendanceBased ? t("contract.attendanceOn") : t("contract.attendanceOff")}
+      </span>
+      {form.contractType === "sivp" && <span className="contract-hint">{t("contract.sivpExempt")}</span>}
 
       <p className="eyebrow contract-subhead">{t("contract.bank")}</p>
       <Field
@@ -582,6 +609,7 @@ const WARNING_KEYS: Record<PayslipWarning, MessageKey> = {
   hourly_no_hours: "payroll.warn.hourly_no_hours",
   negative_net: "payroll.warn.negative_net",
   contract_ends: "payroll.warn.contract_ends",
+  attendance_unavailable: "payroll.warn.attendance_unavailable",
 };
 
 const STATUS_KEYS: Record<PayrollRun["status"], MessageKey> = {
@@ -734,6 +762,7 @@ export function PayrollView({
   }
 
   const isDraft = run?.status === "draft";
+  const inProgress = isMonthInProgress(period);
   const blockingRates = !settings?.verified;
 
   return (
@@ -768,6 +797,18 @@ export function PayrollView({
           </div>
         }
       />
+
+      {state === "ready" && inProgress && (
+        <div className="payroll-banner is-info">
+          <AlertTriangle size={17} />
+          <p>
+            {t("payroll.inProgress", {
+              month: monthLabel(period, dateLocale),
+              date: formatDisplayDate(monthRange(shiftMonth(period, 1)).from, dateLocale),
+            })}
+          </p>
+        </div>
+      )}
 
       {state === "ready" && blockingRates && (
         <div className="payroll-banner">
@@ -852,7 +893,15 @@ export function PayrollView({
                     <button type="button" className="secondary-button" onClick={() => void prepare()}>
                       <RefreshCw size={14} /> {busy ? t("panel.pleaseWait") : t("payroll.recalculate")}
                     </button>
-                    <Button onClick={() => setConfirm("validate")}>{t("payroll.validate")}</Button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => setConfirm("validate")}
+                      disabled={inProgress}
+                      title={inProgress ? t("payroll.validateAfterMonth") : undefined}
+                    >
+                      {t("payroll.validate")}
+                    </button>
                   </>
                 )}
                 {run.status === "validated" && (
@@ -948,6 +997,7 @@ export function PayrollView({
                         aria-label={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
                         title={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
                         onClick={() => setPrinting([payslip])}
+                        disabled={inProgress}
                       >
                         <Download size={15} />
                       </button>
@@ -976,6 +1026,7 @@ export function PayrollView({
           payslips={payslips}
           flash={flash}
           onPrintAll={() => setPrinting(sorted)}
+          inProgress={inProgress}
         />
       )}
 
@@ -986,6 +1037,7 @@ export function PayrollView({
           key={openPayslip.id}
           payslip={openPayslip}
           editable={isDraft}
+          inProgress={inProgress}
           verified={Boolean(settings?.verified)}
           close={() => setOpenPayslip(null)}
           flash={flash}
@@ -1066,11 +1118,23 @@ export function PayrollView({
 // One payslip: lines, variables and one-off items
 // ---------------------------------------------------------------------------
 
-const VARIABLE_FIELDS: { key: keyof PayVariables; label: MessageKey; hourlyOnly?: boolean; monthlyOnly?: boolean }[] = [
+const VARIABLE_FIELDS: {
+  key: keyof PayVariables;
+  label: MessageKey;
+  hourlyOnly?: boolean;
+  monthlyOnly?: boolean;
+  /** "only": time-clock (per hour) pay; "never": day-based pay. */
+  clock?: "only" | "never";
+}[] = [
   { key: "workedHours", label: "payroll.var.workedHours", hourlyOnly: true },
-  { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true },
-  { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true },
+  { key: "unpaidDays", label: "payroll.var.unpaidDays", monthlyOnly: true, clock: "never" },
+  { key: "outsideContractDays", label: "payroll.var.outsideContractDays", monthlyOnly: true, clock: "never" },
+  { key: "absentDays", label: "payroll.var.absentDays", monthlyOnly: true, clock: "never" },
+  { key: "earnedHours", label: "payroll.var.earnedHours", monthlyOnly: true, clock: "never" },
   { key: "absenceHours", label: "payroll.var.absenceHours", monthlyOnly: true },
+  { key: "unpaidHours", label: "payroll.var.unpaidHours", monthlyOnly: true, clock: "only" },
+  { key: "outsideHours", label: "payroll.var.outsideHours", monthlyOnly: true, clock: "only" },
+  { key: "notYetHours", label: "payroll.var.notYetHours", monthlyOnly: true, clock: "only" },
   { key: "overtimeHours", label: "payroll.var.overtimeHours" },
 ];
 
@@ -1118,6 +1182,7 @@ export function PayslipLines({ payslip }: { payslip: Payslip }) {
 function PayslipPanel({
   payslip,
   editable,
+  inProgress,
   verified,
   close,
   flash: rawFlash,
@@ -1125,6 +1190,7 @@ function PayslipPanel({
 }: {
   payslip: Payslip;
   editable: boolean;
+  inProgress: boolean;
   verified: boolean;
   close: () => void;
   flash: (message: string) => void;
@@ -1139,8 +1205,14 @@ function PayslipPanel({
       workedHours: String(current.workedHours),
       unpaidDays: String(current.unpaidDays),
       outsideContractDays: String(current.outsideContractDays ?? 0),
+      absentDays: String(current.absentDays ?? 0),
+      earnedHours: current.earnedHours == null ? "" : String(current.earnedHours),
       absenceHours: String(current.absenceHours),
       overtimeHours: String(current.overtimeHours),
+      scheduledHours: String(current.scheduledHours ?? 0),
+      outsideHours: String(current.outsideHours ?? 0),
+      unpaidHours: String(current.unpaidHours ?? 0),
+      notYetHours: String(current.notYetHours ?? 0),
     };
   });
   const [oneOff, setOneOff] = useState<PayItem[]>(inputs.oneOff);
@@ -1157,8 +1229,14 @@ function PayslipPanel({
       .catch((error: Error) => flash(error.message));
   }, [editable, flash]);
 
-  const fields = VARIABLE_FIELDS.filter((field) =>
-    inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly,
+  const clockPay = (inputs.auto.scheduledHours ?? 0) > 0;
+  const fields = VARIABLE_FIELDS.filter(
+    (field) =>
+      (inputs.contract.payBasis === "hourly" ? !field.monthlyOnly : !field.hourlyOnly) &&
+      (field.clock === undefined || (field.clock === "only") === clockPay) &&
+      (field.key !== "notYetHours" || (inputs.auto.notYetHours ?? 0) > 0) &&
+      // Hours earned so far only apply while the month is in progress.
+      (field.key !== "earnedHours" || inputs.auto.earnedHours != null),
   );
 
   const addOneOff = () => {
@@ -1213,8 +1291,58 @@ function PayslipPanel({
         </ul>
       )}
 
+      {inputs.attendance && (
+        <div className="payslip-attendance">
+          <p className="eyebrow">{t("payroll.attTitle")}</p>
+          <span className="contract-hint">
+            {t("payroll.attUntil", { date: formatDisplayDate(inputs.attendance.countedUntil, dateLocale) })}
+          </span>
+          {inputs.attendance.clock && (
+            <dl className="payslip-clock">
+              <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
+              {inputs.attendance.clock.notYetHours > 0 && (
+                <div><dt>{t("payroll.clockNotYet")}</dt><dd>{inputs.attendance.clock.notYetHours.toLocaleString(dateLocale)} h</dd></div>
+              )}
+              <div><dt>{t("payroll.clockOvertime")}</dt><dd>{inputs.attendance.clock.overtimeHours.toLocaleString(dateLocale)} h</dd></div>
+              <div><dt>{t("payroll.clockLate")}</dt><dd className={inputs.attendance.clock.lateCount ? "is-negative" : undefined}>{inputs.attendance.clock.lateCount}</dd></div>
+              <div><dt>{t("payroll.clockEarly")}</dt><dd className={inputs.attendance.clock.earlyLeaveCount ? "is-negative" : undefined}>{inputs.attendance.clock.earlyLeaveCount}</dd></div>
+              <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.clock.absentDays ? "is-negative" : undefined}>{inputs.attendance.clock.absentDays}</dd></div>
+            </dl>
+          )}
+          {inputs.attendance.clock && <span className="contract-hint">{t("payroll.clockRule")}</span>}
+          <dl hidden={Boolean(inputs.attendance.clock)}>
+            <div><dt>{t("payroll.attScheduled")}</dt><dd>{inputs.attendance.scheduledDays}</dd></div>
+            <div><dt>{t("payroll.attWorked")}</dt><dd>{inputs.attendance.workedDays}</dd></div>
+            <div><dt>{t("payroll.attAbsent")}</dt><dd className={inputs.attendance.absentDays ? "is-negative" : undefined}>{inputs.attendance.absentDays}</dd></div>
+            <div><dt>{t("payroll.attMissing")}</dt><dd>{inputs.attendance.missingHours.toLocaleString(dateLocale)} h</dd></div>
+            <div><dt>{t("payroll.attLeave")}</dt><dd>{inputs.attendance.paidLeaveDays} / {inputs.attendance.unpaidDays}</dd></div>
+            <div><dt>{t("payroll.attHolidays")}</dt><dd>{inputs.attendance.holidayDays}</dd></div>
+            <div><dt>{t("payroll.attOutside")}</dt><dd>{inputs.attendance.outsideContractDays}</dd></div>
+            <div><dt>{t("payroll.attHours")}</dt><dd>{inputs.attendance.workedHours.toLocaleString(dateLocale)} h</dd></div>
+            {inputs.auto.earnedHours != null && (
+              <div>
+                <dt>{t("payroll.attEarned")}</dt>
+                <dd>{(inputs.attendance.earnedHours ?? 0).toLocaleString(dateLocale)} h</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      )}
+      {isExemptContract(inputs.contract.contractType) && (
+        <p className="contract-hint payslip-exempt">{t("contract.sivpExempt")}</p>
+      )}
+
       <PayslipLines payslip={payslip} />
-      <button type="button" className="secondary-button payslip-view-button" onClick={() => setShowDocument(true)}>
+      <PaySimulator payslip={payslip} />
+      <button
+        type="button"
+        className="secondary-button payslip-view-button"
+        onClick={() => setShowDocument(true)}
+        disabled={inProgress}
+        title={inProgress ? t("payroll.validateAfterMonth") : undefined}
+      >
         <Printer size={15} /> {t("payslip.view")}
       </button>
       {showDocument && <PayslipDocument payslips={[payslip]} onClose={() => setShowDocument(false)} />}
@@ -1814,7 +1942,14 @@ function PayslipSheet({ payslip, company }: { payslip: Payslip; company: Payroll
           </dl>
           <dl>
             <div><dt>Contrat</dt><dd>{FR_CONTRACT[inputs.contract.contractType] ?? "—"}</dd></div>
-            <div><dt>N° CNSS</dt><dd>{inputs.contract.cnssNumber ?? "—"}</dd></div>
+            <div>
+              <dt>N° CNSS</dt>
+              <dd>
+                {isExemptContract(inputs.contract.contractType)
+                  ? "Non applicable (SIVP)"
+                  : inputs.contract.cnssNumber ?? "—"}
+              </dd>
+            </div>
             <div><dt>Situation familiale</dt><dd>{family || "—"}</dd></div>
             <div>
               <dt>Banque / RIB</dt>
@@ -1891,6 +2026,9 @@ function PayslipSheet({ payslip, company }: { payslip: Payslip; company: Payroll
             ))}
             <div><dt>Coût total employeur</dt><dd>{frAmount(payslip.employerCost)}</dd></div>
           </dl>
+          {isExemptContract(inputs.contract.contractType) && (
+            <p>Contrat SIVP : exonéré de cotisations CNSS, d’IRPP et de CSS.</p>
+          )}
           <p>Conservez ce bulletin sans limitation de durée.</p>
         </section>
       </article>
@@ -1983,12 +2121,14 @@ function PayrollExports({
   payslips,
   flash,
   onPrintAll,
+  inProgress,
 }: {
   period: string;
   run: PayrollRun;
   payslips: Payslip[];
   flash: (message: string) => void;
   onPrintAll: () => void;
+  inProgress: boolean;
 }) {
   const { t } = useLanguage();
   const [busy, setBusy] = useState<string | null>(null);
@@ -2044,13 +2184,15 @@ function PayrollExports({
           type="button"
           className="payroll-export"
           onClick={onPrintAll}
-          disabled={payslips.length === 0}
+          disabled={payslips.length === 0 || inProgress}
         >
           <Printer size={16} />
           <span>
             <b>{t("payslip.exportAll")}</b>
             <small>
-              {published
+              {inProgress
+                ? t("payroll.validateAfterMonth")
+                : published
                 ? t("payslip.exportAllNote", { count: payslips.length })
                 : t("payslip.exportAllDraft")}
             </small>
@@ -2086,5 +2228,55 @@ function PayrollExports({
         </button>
       </div>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "How much for N days?" — estimate from the contract, outside the time clock
+// ---------------------------------------------------------------------------
+
+function PaySimulator({ payslip }: { payslip: Payslip }) {
+  const { t, dateLocale } = useLanguage();
+  const [value, setValue] = useState("10");
+  const [unit, setUnit] = useState<"days" | "hours">("days");
+  const { contract, rates, auto } = payslip.inputs;
+  const quantity = Math.max(0, Number(value.replace(",", ".")) || 0);
+  const hours = unit === "days" ? quantity * SIMULATION_DAY_HOURS : quantity;
+  const scheduled = auto.scheduledHours ?? 0;
+  const result = simulatePay(contract, rates, hours, scheduled);
+  const money = (amount: number) => formatTnd(amount, dateLocale);
+
+  return (
+    <div className="detail-block pay-simulator">
+      <p className="eyebrow">{t("payroll.simTitle")}</p>
+      <span className="contract-hint">{t("payroll.simNote", { hours: SIMULATION_DAY_HOURS })}</span>
+      <div className="pay-simulator-input">
+        <input
+          id={`sim-${payslip.id}`}
+          type="number"
+          min="0"
+          step={unit === "days" ? "0.5" : "0.25"}
+          value={value}
+          aria-label={t("payroll.simQuantity")}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        <select
+          aria-label={t("payroll.simUnit")}
+          value={unit}
+          onChange={(event) => setUnit(event.target.value as "days" | "hours")}
+        >
+          <option value="days">{t("payroll.simDays")}</option>
+          <option value="hours">{t("payroll.simHours")}</option>
+        </select>
+      </div>
+      <dl>
+        <div><dt>{t("payroll.simHourValue")}</dt><dd>{money(result.hourValue)}</dd></div>
+        <div><dt>{t("payroll.simDayValue", { hours: SIMULATION_DAY_HOURS })}</dt><dd>{money(round3(result.hourValue * SIMULATION_DAY_HOURS))}</dd></div>
+        <div><dt>{t("payroll.gross")}</dt><dd>{money(result.gross)}</dd></div>
+        <div><dt>{t("payroll.cnss")}</dt><dd>{money(result.cnssEmployee)}</dd></div>
+        <div><dt>{t("payroll.tax")}</dt><dd>{money(round3(result.irpp + result.css))}</dd></div>
+        <div className="is-net"><dt>{t("payroll.net")}</dt><dd>{money(result.net)}</dd></div>
+      </dl>
+    </div>
   );
 }
