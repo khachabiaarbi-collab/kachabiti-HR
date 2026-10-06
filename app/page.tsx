@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Check, ChevronRight, Loader2, Menu } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ import {
 } from "@/components/modals";
 import { Logo } from "@/components/primitives";
 import { screenLabel, translateRole, useT } from "@/lib/i18n";
+import { useVacationBalances } from "@/lib/use-leave-hours";
 import type {
   Authorization,
   CompanyEvent,
@@ -38,6 +39,7 @@ import {
   mapEvent,
   mapLeaveBalance,
   mapLeaveRequest,
+  isAnnualLeaveType,
   mapLeaveType,
   mapNotice,
   toUiRole,
@@ -335,6 +337,8 @@ export default function Page() {
   const reload = async () => {
     const data = await loadWorkspace();
     if (data) applyWorkspace(data);
+    // Approvals change the vacation ledger.
+    void vacation.reload();
   };
 
   useEffect(() => {
@@ -441,6 +445,29 @@ export default function Page() {
 
   const isEmployee = path.startsWith("/dashboard");
   const role: Role = toUiRole(currentEmployee?.role, isEmployee ? "Employee" : "Admin");
+
+  // One vacation balance everywhere: the ledger (opening − approved) plus what
+  // the time clock has earned. Editing (EmployeeDetail) keeps the ledger.
+  const vacation = useVacationBalances(
+    !currentEmployee ? null : isEmployee ? "self" : "staff",
+    currentEmployee?.id ?? null,
+  );
+  const shownBalances = useMemo(() => {
+    const figures = vacation.figures;
+    const annual = leaveTypes.find((type) => isAnnualLeaveType(type));
+    if (!figures || !annual) return balances;
+    const next = balances.map((row) =>
+      row.leaveTypeId === annual.id && figures.has(row.employeeId)
+        ? { ...row, daysRemaining: figures.get(row.employeeId)!.balanceDays }
+        : row,
+    );
+    for (const [employeeId, figure] of figures) {
+      if (!next.some((row) => row.employeeId === employeeId && row.leaveTypeId === annual.id)) {
+        next.push({ employeeId, leaveTypeId: annual.id, typeName: annual.name, daysRemaining: figure.balanceDays });
+      }
+    }
+    return next;
+  }, [balances, leaveTypes, vacation.figures]);
 
   const openNotice = async (item: Notice) => {
     if (/^Your payslip for /.test(item.text)) {
@@ -605,7 +632,7 @@ export default function Page() {
               flash={flash}
               setModal={setModal}
               currentEmployee={currentEmployee}
-              balances={balances}
+              balances={shownBalances}
               leaveTypes={leaveTypes}
               events={events}
               noticeFocus={noticeFocus}
@@ -630,7 +657,7 @@ export default function Page() {
               globalSearch={globalSearch}
               currentEmployee={currentEmployee}
               events={events}
-              balances={balances}
+              balances={shownBalances}
               setBalances={setBalances}
               leaveTypes={leaveTypes}
               noticeFocus={noticeFocus}
@@ -651,7 +678,7 @@ export default function Page() {
       {modal === "request" && (
         <RequestModal
           leaveTypes={leaveTypes}
-          balances={balances}
+          balances={shownBalances}
           requests={requests}
           employeeId={currentEmployee?.id ?? null}
           close={() => setModal(null)}
@@ -718,6 +745,7 @@ export default function Page() {
           departments={departments}
           leaveTypes={leaveTypes}
           balances={balances}
+          vacation={vacation.figures?.get(selected.id) ?? null}
           canManagePayroll={role === "Admin"}
           close={() => setSelected(null)}
           flash={flash}

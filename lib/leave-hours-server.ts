@@ -19,7 +19,15 @@ import {
   type LeaveHourTeamItem,
   type LeavePunch,
 } from "@/lib/leave-hours";
-import { DEFAULT_MONTHLY_LEAVE_DAYS, isAnnualLeaveType } from "@/lib/map-rows";
+import {
+  accrueLeave,
+  rateForMonth,
+  vacationBalance,
+  type Accrual,
+  type CreditWindowDay,
+  type RateChange,
+} from "@/lib/leave-accrual";
+import { DEFAULT_MONTHLY_LEAVE_DAYS, isAnnualLeaveType, isUnpaidLeaveType } from "@/lib/map-rows";
 
 type PunchRow = {
   employee_id: string;
@@ -144,6 +152,35 @@ function rateOf(employee: EmployeeRow) {
 
 export async function getSelfLeaveHours(auth?: AttendanceAuth): Promise<LeaveHourSelf> {
   const session = auth ?? (await requireAttendanceAuth());
+  const [employee] = await loadEmployees(session, session.userId);
+  if (!employee) {
+    throw new AttendanceServerError("FORBIDDEN", 403, "Employee profile not found.");
+  }
+  const [balance] = await computeBalances(session, [employee]);
+  if (balance) {
+    const today = todayInTunis();
+    const month = balance.accrual.months.find((item) => item.month === monthKey(today));
+    return {
+      balanceDays: balance.balanceDays,
+      monthlyRate: balance.monthlyRate,
+      ledgerDays: balance.ledgerDays,
+      earnedDays: balance.accrual.earnedDays,
+      thisMonth: {
+        month: monthKey(today),
+        scheduledHours: month?.scheduledHours ?? 0,
+        punchedHours: month?.creditedHours ?? 0,
+        extraHours: 0,
+        earnedDays: month?.earnedDays ?? 0,
+        uncoveredAuthorizationHours: month?.uncoveredAuthorizationHours ?? 0,
+        hourValueDays: month?.hourValueDays ?? 0,
+      },
+    };
+  }
+  return legacySelfLeaveHours(session);
+}
+
+/** Before leave_accrual.sql: earned from raw punched minutes only. */
+async function legacySelfLeaveHours(session: AttendanceAuth): Promise<LeaveHourSelf> {
   const today = todayInTunis();
   const [employee] = await loadEmployees(session, session.userId);
   if (!employee) {
@@ -263,4 +300,209 @@ export async function getTeamLeaveHours(month: string): Promise<LeaveHourTeamIte
       }),
     }))
     .sort((left, right) => left.employeeName.localeCompare(right.employeeName));
+}
+
+// ---------------------------------------------------------------------------
+// One vacation balance for everyone (supabase/leave_accrual.sql)
+// ---------------------------------------------------------------------------
+
+export type LeaveBalanceItem = {
+  employeeId: string;
+  /** leave_balances: opening balance entered by the admin minus approved deductions. */
+  ledgerDays: number;
+  balanceDays: number;
+  monthlyRate: number;
+  accrual: Accrual;
+};
+
+function nowInTunis(now = new Date()) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: ATTENDANCE_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(now);
+}
+
+function addDays(iso: string, days: number) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+const holidayCache = new Map<number, Set<string>>();
+
+async function holidaysFor(years: number[]) {
+  const dates = new Set<string>();
+  for (const year of years) {
+    let set = holidayCache.get(year);
+    if (!set) {
+      set = new Set<string>();
+      try {
+        const response = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/TN`, {
+          next: { revalidate: 86400 },
+        });
+        if (response.ok) {
+          for (const row of (await response.json()) as { date?: string }[]) {
+            if (row?.date) set.add(row.date.slice(0, 10));
+          }
+        }
+      } catch {
+        // Without the holiday list, holidays count as ordinary scheduled days.
+      }
+      holidayCache.set(year, set);
+    }
+    for (const date of set) dates.add(date);
+  }
+  return dates;
+}
+
+type WindowRow = {
+  employee_id: string;
+  work_date: string;
+  scheduled_minutes: number;
+  segments: CreditWindowDay["segments"] | null;
+  sessions: CreditWindowDay["sessions"] | null;
+  authorizations: CreditWindowDay["authorizations"] | null;
+};
+
+/** null when leave_accrual.sql is not installed yet. */
+async function loadWindows(auth: AttendanceAuth, employeeId: string | null, from: string, to: string) {
+  const byEmployee = new Map<string, CreditWindowDay[]>();
+  for (let start = from; start <= to; start = addDays(start, 366)) {
+    const end = addDays(start, 365) < to ? addDays(start, 365) : to;
+    const { data, error } = await auth.supabase.rpc("attendance_credit_windows", {
+      p_employee_id: employeeId,
+      p_from: start,
+      p_to: end,
+    });
+    if (error) return null;
+    for (const row of (data ?? []) as WindowRow[]) {
+      const days = byEmployee.get(row.employee_id) ?? [];
+      days.push({
+        date: String(row.work_date).slice(0, 10),
+        scheduledMinutes: Number(row.scheduled_minutes) || 0,
+        segments: row.segments ?? [],
+        sessions: row.sessions ?? [],
+        authorizations: row.authorizations ?? [],
+      });
+      byEmployee.set(row.employee_id, days);
+    }
+  }
+  return byEmployee;
+}
+
+/**
+ * Balance per employee. Returns [] when the accrual SQL is missing, so callers
+ * can fall back to the previous calculation.
+ */
+async function computeBalances(auth: AttendanceAuth, employees: EmployeeRow[]): Promise<LeaveBalanceItem[]> {
+  if (!employees.length) return [];
+  const today = todayInTunis();
+  const single = employees.length === 1 ? employees[0].id : null;
+
+  // Nothing is earned before the first punch, so start at that month.
+  const firstPunch = await auth.supabase
+    .from("attendance_punches")
+    .select("work_date")
+    .is("voided_at", null)
+    .in("employee_id", employees.map((employee) => employee.id))
+    .order("work_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const firstDate = (firstPunch.data as { work_date?: string } | null)?.work_date?.slice(0, 10) ?? today;
+  const from = `${firstDate.slice(0, 7)}-01`;
+  const to = monthEnd(monthKey(today));
+
+  const windows = await loadWindows(auth, single, from, to);
+  if (!windows) return [];
+
+  const annualIds = await annualTypeIds(auth);
+  const [ledgerRows, rateRows, leaveRows, typeRows] = await Promise.all([
+    selectPages<{ employee_id: string; leave_type_id: string; days_remaining: number | string }>((start, end) => {
+      let query = auth.supabase
+        .from("leave_balances")
+        .select("employee_id, leave_type_id, days_remaining")
+        .range(start, end);
+      if (single) query = query.eq("employee_id", single);
+      return query;
+    }),
+    auth.supabase.from("leave_rate_changes").select("employee_id, effective_month, monthly_days"),
+    selectPages<{ employee_id: string; start_date: string; end_date: string; leave_type_id: string | null }>(
+      (start, end) => {
+        let query = auth.supabase
+          .from("leave_requests")
+          .select("employee_id, start_date, end_date, leave_type_id")
+          .eq("status", "approved")
+          .gte("end_date", from)
+          .range(start, end);
+        if (single) query = query.eq("employee_id", single);
+        return query;
+      },
+    ),
+    auth.supabase.from("leave_types").select("id, name, default_days"),
+  ]);
+
+  const unpaidTypes = new Set(
+    ((typeRows.data ?? []) as { id: string; name: string; default_days: number | null }[])
+      .filter((type) => isUnpaidLeaveType({ name: type.name, defaultDays: Number(type.default_days) || 0 }))
+      .map((type) => type.id),
+  );
+  const years = Array.from(
+    { length: Number(today.slice(0, 4)) - Number(from.slice(0, 4)) + 1 },
+    (_, index) => Number(from.slice(0, 4)) + index,
+  );
+  const holidays = await holidaysFor(years);
+  const now = nowInTunis();
+
+  return employees.map((employee) => {
+    const ledgerDays = ledgerRows
+      .filter((row) => row.employee_id === employee.id && annualIds.has(String(row.leave_type_id)))
+      .reduce((total, row) => total + (Number(row.days_remaining) || 0), 0);
+    const changes: RateChange[] = ((rateRows.data ?? []) as {
+      employee_id: string;
+      effective_month: string;
+      monthly_days: number | string;
+    }[])
+      .filter((row) => row.employee_id === employee.id)
+      .map((row) => ({ effectiveMonth: String(row.effective_month).slice(0, 10), monthlyDays: Number(row.monthly_days) }));
+    const current = rateOf(employee);
+    const paidLeave = new Set<string>();
+    for (const row of leaveRows) {
+      if (row.employee_id !== employee.id || (row.leave_type_id && unpaidTypes.has(row.leave_type_id))) continue;
+      for (let date = row.start_date.slice(0, 10); date <= row.end_date.slice(0, 10); date = addDays(date, 1)) {
+        paidLeave.add(date);
+      }
+    }
+    const accrual = accrueLeave(windows.get(employee.id) ?? [], {
+      employedFrom: employee.start_date?.slice(0, 10) ?? null,
+      today,
+      now,
+      holidays,
+      paidLeave,
+      rateFor: (month) => rateForMonth(changes, month, current),
+    });
+    return {
+      employeeId: employee.id,
+      ledgerDays,
+      balanceDays: vacationBalance(ledgerDays, accrual),
+      monthlyRate: rateForMonth(changes, monthKey(today), current),
+      accrual,
+    };
+  });
+}
+
+/** Admin / manager: every active employee's vacation balance. */
+export async function getStaffLeaveBalances() {
+  const auth = await requireAttendanceAuth(true);
+  const employees = (await loadEmployees(auth)).filter((employee) => employee.status !== "inactive");
+  const items = await computeBalances(auth, employees);
+  return items.map(({ employeeId, ledgerDays, balanceDays, monthlyRate, accrual }) => ({
+    employeeId,
+    ledgerDays,
+    earnedDays: accrual.earnedDays,
+    uncoveredAuthorizationHours: accrual.uncoveredAuthorizationHours,
+    balanceDays,
+    monthlyRate,
+  }));
 }

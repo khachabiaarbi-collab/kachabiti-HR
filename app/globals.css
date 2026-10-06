@@ -4778,3 +4778,38 @@ button.attendance-report-row:hover {
   font-size: 14px;
   font-weight: 700;
 }
+
+/* Vacation: opening balance + time-clock accrual */
+.solde-opening-label {
+  display: block;
+  color: #9ca3af;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.solde-accrual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+.solde-accrual > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.solde-accrual b {
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+.solde-accrual .is-total b,
+.solde-accrual .is-total span {
+  color: #1f3a8a;
+  font-weight: 700;
+}
+.solde-accrual small {
+  color: #6b7280;
+  line-height: 1.45;
+}
