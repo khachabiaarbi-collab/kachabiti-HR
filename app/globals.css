@@ -4683,3 +4683,7 @@ button.attendance-report-row:hover {
 .payroll-missing-hint {
   color: #b45309;
 }
+.payroll-missing-names small {
+  color: #b45309;
+  font-weight: 500;
+}

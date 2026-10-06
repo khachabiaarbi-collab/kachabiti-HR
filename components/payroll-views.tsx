@@ -51,8 +51,10 @@ import {
   deleteDraftRun,
   effectiveVariables,
   endEmployeeComponent,
+  exclusionReason,
   loadCompany,
   loadComponents,
+  loadContractPeriods,
   loadEmployeeComponents,
   loadMyPayslips,
   loadPublishedPayslips,
@@ -70,6 +72,7 @@ import {
   shiftMonth,
   toPayItem,
   updatePayslip,
+  type ContractPeriod,
   type EmployeePayComponent,
   type PayComponent,
   type PayrollCompany,
@@ -607,7 +610,7 @@ export function PayrollView({
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [settings, setSettings] = useState<PayrollSettings | null>(null);
-  const [missing, setMissing] = useState<Employee[] | null>(null);
+  const [contractPeriods, setContractPeriods] = useState<ContractPeriod[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "missing-table">("loading");
   const [busy, setBusy] = useState(false);
   const [openPayslip, setOpenPayslip] = useState<Payslip | null>(null);
@@ -619,11 +622,15 @@ export function PayrollView({
   const load = useCallback(async () => {
     setState("loading");
     try {
-      const [nextRun, nextSettings] = await Promise.all([loadRun(period), loadSettings(year)]);
+      const [nextRun, nextSettings, periods] = await Promise.all([
+        loadRun(period),
+        loadSettings(year),
+        loadContractPeriods(),
+      ]);
       setRun(nextRun);
       setSettings(nextSettings);
+      setContractPeriods(periods);
       setPayslips(nextRun ? await loadPayslips(nextRun.id) : []);
-      setMissing(null);
       setState("ready");
     } catch (error) {
       const message = (error as Error).message;
@@ -662,15 +669,24 @@ export function PayrollView({
       ),
     [payslips],
   );
-  const notIncluded =
-    missing ??
-    (run
-      ? employees.filter(
-          (employee) =>
-            employee.status !== "Inactive" &&
-            !payslips.some((payslip) => payslip.employeeId === employee.id),
-        )
-      : []);
+  const notIncluded = run
+    ? employees.filter(
+        (employee) =>
+          employee.status !== "Inactive" &&
+          !payslips.some((payslip) => payslip.employeeId === employee.id),
+      )
+    : [];
+  const { from: monthFrom, to: monthTo } = monthRange(period);
+  const reasonLabel = (employee: Employee) => {
+    const reason = exclusionReason(contractPeriods, employee.id, monthFrom, monthTo);
+    if (reason.kind === "starts_later") {
+      return t("payroll.reasonStartsLater", { date: formatDisplayDate(reason.date, dateLocale) });
+    }
+    if (reason.kind === "ended") {
+      return t("payroll.reasonEnded", { date: formatDisplayDate(reason.date, dateLocale) });
+    }
+    return t("payroll.reasonNoContract");
+  };
   const money = (value: number) => formatTnd(round3(value), dateLocale);
 
   const prepare = async () => {
@@ -680,8 +696,12 @@ export function PayrollView({
     try {
       const result = await prepareRun(period, employees, settings);
       setRun(result.run);
-      setPayslips(await loadPayslips(result.run.id));
-      setMissing(result.missingContract);
+      const [nextPayslips, periods] = await Promise.all([
+        loadPayslips(result.run.id),
+        loadContractPeriods(),
+      ]);
+      setPayslips(nextPayslips);
+      setContractPeriods(periods);
       flash(t("payroll.prepared"));
     } catch (error) {
       flash((error as Error).message);
@@ -863,9 +883,12 @@ export function PayrollView({
                           }}
                         >
                           <Plus size={12} /> {employee.name}
+                          <small>· {reasonLabel(employee)}</small>
                         </button>
                       ) : (
-                        <span key={employee.id}>{employee.name}</span>
+                        <span key={employee.id}>
+                          {employee.name} <small>· {reasonLabel(employee)}</small>
+                        </span>
                       ),
                     )}
                   </div>

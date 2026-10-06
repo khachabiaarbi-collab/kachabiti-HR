@@ -782,3 +782,33 @@ export async function loadPublishedPayslips(from: string, to: string) {
   if (error) throw new Error(error.message);
   return ((data ?? []) as PayslipRow[]).map(mapPayslip);
 }
+
+export type ContractPeriod = { employeeId: string; effectiveFrom: string; contractEnd: string | null };
+
+/** Every contract version's dates, to explain why someone has no payslip. */
+export async function loadContractPeriods(): Promise<ContractPeriod[]> {
+  const { data, error } = await createClient()
+    .from("employee_contracts")
+    .select("employee_id, effective_from, contract_end");
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as { employee_id: string; effective_from: string; contract_end: string | null }[]).map(
+    (row) => ({ employeeId: row.employee_id, effectiveFrom: row.effective_from, contractEnd: row.contract_end }),
+  );
+}
+
+export type ExclusionReason =
+  | { kind: "no_contract" }
+  | { kind: "starts_later"; date: string }
+  | { kind: "ended"; date: string };
+
+/** Why an active employee has no payslip for the month [from, to]. */
+export function exclusionReason(periods: ContractPeriod[], employeeId: string, from: string, to: string): ExclusionReason {
+  const mine = periods
+    .filter((period) => period.employeeId === employeeId)
+    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom));
+  if (!mine.length) return { kind: "no_contract" };
+  const inForce = mine.find((period) => period.effectiveFrom <= to);
+  if (!inForce) return { kind: "starts_later", date: mine[mine.length - 1].effectiveFrom };
+  if (inForce.contractEnd && inForce.contractEnd < from) return { kind: "ended", date: inForce.contractEnd };
+  return { kind: "no_contract" };
+}
