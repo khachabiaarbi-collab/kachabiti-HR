@@ -51,6 +51,7 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
+import type { VacationFigure } from "@/lib/use-leave-hours";
 import {
   formatDaysLabel,
   translateRole,
@@ -849,6 +850,7 @@ export function EmployeeDetail({
   departments,
   leaveTypes,
   balances = [],
+  vacation = null,
   canManagePayroll = false,
   close,
   flash,
@@ -858,6 +860,8 @@ export function EmployeeDetail({
   departments: Department[];
   leaveTypes: LeaveType[];
   balances?: LeaveBalance[];
+  /** Ledger + time-clock accrual, from the vacation balance service. */
+  vacation?: VacationFigure | null;
   canManagePayroll?: boolean;
   close: () => void;
   flash: (message: string) => void;
@@ -893,6 +897,7 @@ export function EmployeeDetail({
   );
   const [saving, setSaving] = useState(false);
   const t = useT();
+  const { dateLocale } = useLanguage();
 
   const applyHireSolde = (nextStart: string, nextMonthly: string) => {
     setStartDate(nextStart);
@@ -1077,6 +1082,7 @@ export function EmployeeDetail({
             value={monthlyLeaveDays}
             onChange={(value) => applyHireSolde(startDate, value)}
           />
+          <span className="contract-hint">{t("panel.rateNote")}</span>
         </div>
         <div className="detail-block">
           <p className="eyebrow">{t("panel.solde")}</p>
@@ -1086,7 +1092,12 @@ export function EmployeeDetail({
           ) : (
             solde.map((row, index) => (
               <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
-                <span>{row.typeName}</span>
+                <span>
+                  {row.typeName}
+                  {isAnnualLeaveType({ name: row.typeName }) && (
+                    <small className="solde-opening-label">{t("panel.openingLabel")}</small>
+                  )}
+                </span>
                 <div>
                   <button
                     type="button"
@@ -1121,6 +1132,13 @@ export function EmployeeDetail({
                 </div>
               </div>
             ))
+          )}
+          {vacation && (
+            <div className="solde-accrual">
+              <div><span>{t("panel.accrualEarned")}</span><b>{formatLeaveDayCount(vacation.earnedDays ?? 0, dateLocale)} {t("panel.daysShort")}</b></div>
+              <div className="is-total"><span>{t("panel.accrualTotal")}</span><b>{formatLeaveDayCount(vacation.balanceDays, dateLocale)} {t("panel.daysShort")}</b></div>
+              <small>{t("panel.accrualNote")}</small>
+            </div>
           )}
         </div>
         <Button onClick={() => void save()}>

@@ -25,6 +25,19 @@ export type LeaveHourSelf = {
   balanceDays: number;
   monthlyRate: number;
   thisMonth: LeaveHourMonth;
+  /** Opening balance entered by the admin, minus approved deductions. */
+  ledgerDays?: number;
+  /** Earned from the time clock since the hire date. */
+  earnedDays?: number;
+};
+
+export type StaffLeaveBalance = {
+  employeeId: string;
+  ledgerDays: number;
+  earnedDays: number;
+  uncoveredAuthorizationHours: number;
+  balanceDays: number;
+  monthlyRate: number;
 };
 
 export type LeaveHourTeamItem = LeaveHourMonth & {

@@ -208,38 +208,6 @@ async function persistLeaveDecision(
   return error?.message ?? null;
 }
 
-async function deductAnnualLeaveDays(
-  supabase: ReturnType<typeof createClient>,
-  employeeId: string,
-  days: number,
-) {
-  if (days <= 0) return null;
-  const { data: types, error: typesError } = await supabase
-    .from("leave_types")
-    .select("id, name, code");
-  if (typesError) return typesError.message;
-  const annual = (types ?? []).find((type) => isAnnualLeaveType(type));
-  if (!annual) return "Vacation leave type not found";
-
-  const { data: annualBalance, error: annualLoadError } = await supabase
-    .from("leave_balances")
-    .select("days_remaining")
-    .eq("employee_id", employeeId)
-    .eq("leave_type_id", annual.id)
-    .maybeSingle();
-  if (annualLoadError) return annualLoadError.message;
-
-  const { error: annualError } = await supabase.from("leave_balances").upsert(
-    {
-      employee_id: employeeId,
-      leave_type_id: annual.id,
-      days_remaining: (Number(annualBalance?.days_remaining) || 0) - days,
-    },
-    { onConflict: "employee_id,leave_type_id" },
-  );
-  return annualError?.message ?? null;
-}
-
 async function persistAuthorizationDecision(
   requestId: string,
   status: "approved" | "rejected",
