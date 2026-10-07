@@ -98,6 +98,16 @@ Approval and rejection notify the employee. Opening an attendance notice takes
 staff to **Attendance → Correction requests** and employees to **Time clock**.
 Immediate punch results still use the toast only.
 
+## Direct corrections (staff)
+
+Administrators and managers can correct attendance without waiting for a
+request: **Attendance → Records**, open a day, then edit or remove a punch or
+add one; **Correct attendance** above the table covers days with no punch.
+The correction is created and approved in one step (`apply: true` on
+`POST /api/attendance/correction-requests`), with the same chronology checks,
+locking and audit trail as a reviewed request. If it is invalid it is rejected
+and nothing changes.
+
 ## Admin attendance view
 
 The **Attendance** screen is available to `admin` and `manager` roles.

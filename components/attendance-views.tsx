@@ -24,9 +24,12 @@ import {
   Trash2,
   Users,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { Header, Metric } from "@/components/primitives";
+import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
 import {
   formatLeaveDayCount,
   type LeaveHourTeamItem,
@@ -222,7 +225,7 @@ function shiftIsoDate(iso: string, days: number) {
 export function EmployeeTimeClock({
   flash,
 }: {
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const { t, dateLocale } = useLanguage();
   const { balance: leaveHours, reload: reloadLeaveHours } = useLeaveHourBalance();
@@ -297,7 +300,7 @@ export function EmployeeTimeClock({
           pendingIdempotencyKey.current = null;
           await load();
         }
-        flash(apiMessage(payload, t("att.punchFailed")));
+        flash(apiMessage(payload, t("att.punchFailed")), "error");
         return;
       }
       pendingIdempotencyKey.current = null;
@@ -312,7 +315,7 @@ export function EmployeeTimeClock({
           : t("att.exitOk"),
       );
     } catch {
-      flash(t("att.networkRetry"));
+      flash(t("att.networkRetry"), "error");
     } finally {
       setBusy(false);
     }
@@ -638,7 +641,7 @@ export function AdminAttendance({
 }: {
   employees: Employee[];
   departments: Department[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   focusCorrectionId?: string | null;
   onNoticeFocusHandled?: () => void;
 }) {
@@ -663,6 +666,11 @@ export function AdminAttendance({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedCorrection, setSelectedCorrection] =
     useState<AttendanceCorrectionRequest | null>(null);
+  const [direct, setDirect] = useState<{
+    draft: CorrectionDraft;
+    employeeId: string | null;
+    workDate: string;
+  } | null>(null);
   const pageSize = 20;
 
   const loadRecords = useCallback(async () => {
@@ -875,17 +883,14 @@ export function AdminAttendance({
               <span className="filter-title">
                 <Timer size={15} /> {t("att.monthHours")}
               </span>
-              <label>
-                {t("att.month")}
-                <input
-                  type="month"
-                  value={hoursMonth}
-                  onChange={(event) => {
-                    setHoursMonth(event.target.value);
-                    setHoursPage(1);
-                  }}
-                />
-              </label>
+              <MonthSwitcher
+                value={hoursMonth}
+                label={t("att.month")}
+                onChange={(month) => {
+                  setHoursMonth(month);
+                  setHoursPage(1);
+                }}
+              />
               <button
                 type="button"
                 className="secondary-button"
@@ -1025,28 +1030,23 @@ export function AdminAttendance({
               <span className="filter-title">
                 <Filter size={15} /> {t("att.filters")}
               </span>
-              <label>
-                {t("att.from")}
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(event) => {
-                    setFrom(event.target.value);
+              <div className="attendance-filter-range">
+                <span>
+                  {t("att.from")} – {t("att.to")}
+                </span>
+                <DateRangePicker
+                  startDate={from}
+                  endDate={to}
+                  onStartDate={(value) => {
+                    setFrom(value);
+                    setPage(1);
+                  }}
+                  onEndDate={(value) => {
+                    setTo(value);
                     setPage(1);
                   }}
                 />
-              </label>
-              <label>
-                {t("att.to")}
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(event) => {
-                    setTo(event.target.value);
-                    setPage(1);
-                  }}
-                />
-              </label>
+              </div>
               <label>
                 {t("admin.colEmployee")}
                 <select
@@ -1097,6 +1097,19 @@ export function AdminAttendance({
                   <option value="locked">{t("att.locked")}</option>
                 </select>
               </label>
+              <button
+                type="button"
+                className="primary-button attendance-direct-button"
+                onClick={() =>
+                  setDirect({
+                    draft: { operation: "add", target: null },
+                    employeeId: employeeId || null,
+                    workDate: today,
+                  })
+                }
+              >
+                <PencilLine size={14} /> {t("att.directButton")}
+              </button>
             </div>
 
             <div className="attendance-report-table">
@@ -1155,7 +1168,12 @@ export function AdminAttendance({
                       </span>
                     </button>
                     {expandedId === `${item.employeeId}:${item.workDate}` && (
-                      <AttendanceRecordDetail item={item} />
+                      <AttendanceRecordDetail
+                        item={item}
+                        onCorrect={(draft) =>
+                          setDirect({ draft, employeeId: item.employeeId, workDate: item.workDate })
+                        }
+                      />
                     )}
                   </div>
                 ))
@@ -1244,6 +1262,20 @@ export function AdminAttendance({
         </section>
       )}
 
+      {direct && (
+        <CorrectionRequestModal
+          key={`${direct.employeeId ?? "any"}:${direct.workDate}:${direct.draft.target?.id ?? "new"}:${direct.draft.operation}`}
+          draft={direct.draft}
+          defaultWorkDate={direct.workDate}
+          direct={{ employees, employeeId: direct.employeeId }}
+          close={() => setDirect(null)}
+          submitted={async () => {
+            setDirect(null);
+            flash(t("att.directApplied"));
+            await loadRecords();
+          }}
+        />
+      )}
       {selectedCorrection && (
         <CorrectionDecisionPanel
           request={selectedCorrection}
@@ -1332,18 +1364,54 @@ export function AdminAttendanceOverviewCard({
   );
 }
 
-function AttendanceRecordDetail({ item }: { item: AttendanceReportItem }) {
+function AttendanceRecordDetail({
+  item,
+  onCorrect,
+}: {
+  item: AttendanceReportItem;
+  /** Staff: open a direct correction for this day. */
+  onCorrect?: (draft: CorrectionDraft) => void;
+}) {
   const t = useT();
   return (
     <div className="attendance-record-detail">
       <div>
         <p className="eyebrow">{t("att.timeline")}</p>
         {item.timeline.map((punch) => (
-          <span key={punch.id}>
+          <span key={punch.id} className={onCorrect ? "has-actions" : undefined}>
             <b>{punchTypeLabel(t, punch.type)}</b>
             {formatTime(punch.occurredAt)}
+            {onCorrect && (
+              <em className="punch-actions">
+                <button
+                  type="button"
+                  aria-label={t("att.changePunch")}
+                  title={t("att.changePunch")}
+                  onClick={() => onCorrect({ operation: "change", target: punch })}
+                >
+                  <PencilLine size={13} />
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("att.removePunch")}
+                  title={t("att.removePunch")}
+                  onClick={() => onCorrect({ operation: "void", target: punch })}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </em>
+            )}
           </span>
         ))}
+        {onCorrect && (
+          <button
+            type="button"
+            className="secondary-button punch-add"
+            onClick={() => onCorrect({ operation: "add", target: null })}
+          >
+            <Plus size={13} /> {t("att.addPunch")}
+          </button>
+        )}
       </div>
       <div>
         <p className="eyebrow">{t("att.schedule")}</p>
@@ -1530,7 +1598,7 @@ export function AttendanceScheduleSettings({
   flash,
 }: {
   employees: Employee[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const t = useT();
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
@@ -1832,28 +1900,23 @@ function ScheduleAssignments({
               </option>
             ))}
           </select>
-          <input
-            type="date"
+          <DatePicker
             value={assignment.effectiveFrom}
-            onChange={(event) =>
+            onChange={(value) =>
               onChange(
                 assignments.map((item, itemIndex) =>
-                  itemIndex === index
-                    ? { ...item, effectiveFrom: event.target.value }
-                    : item,
+                  itemIndex === index ? { ...item, effectiveFrom: value } : item,
                 ),
               )
             }
           />
-          <input
-            type="date"
+          <DatePicker
             value={assignment.effectiveTo ?? ""}
-            onChange={(event) =>
+            min={assignment.effectiveFrom || undefined}
+            onChange={(value) =>
               onChange(
                 assignments.map((item, itemIndex) =>
-                  itemIndex === index
-                    ? { ...item, effectiveTo: event.target.value || null }
-                    : item,
+                  itemIndex === index ? { ...item, effectiveTo: value || null } : item,
                 ),
               )
             }
@@ -1883,35 +1946,45 @@ function CorrectionRequestModal({
   defaultWorkDate,
   close,
   submitted,
+  direct,
 }: {
   draft: CorrectionDraft;
   defaultWorkDate: string;
   close: () => void;
   submitted: () => Promise<void>;
+  /** Admin / manager correcting directly (applied at once, no employee request). */
+  direct?: { employees: Employee[]; employeeId: string | null };
 }) {
   const t = useT();
   const [operation, setOperation] = useState(draft.operation);
   const [type, setType] = useState<AttendancePunchType>(
     draft.target?.type ?? "entry",
   );
-  const [occurredAt, setOccurredAt] = useState(
-    draft.target
-      ? datetimeLocalValue(draft.target.occurredAt)
-      : `${defaultWorkDate}T09:00`,
-  );
+  const initial = draft.target
+    ? datetimeLocalValue(draft.target.occurredAt)
+    : `${defaultWorkDate}T08:00`;
+  const [date, setDate] = useState(initial.slice(0, 10));
+  const [time, setTime] = useState(initial.slice(11, 16));
+  const occurredAt = `${date}T${time}`;
+  const [employeeId, setEmployeeId] = useState(direct?.employeeId ?? "");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const workDate = useMemo(() => occurredAt.slice(0, 10) || defaultWorkDate, [
-    occurredAt,
-    defaultWorkDate,
-  ]);
+  const workDate = date || defaultWorkDate;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (reason.trim().length < 3) {
       setError(t("att.reasonShort"));
+      return;
+    }
+    if (direct && !employeeId) {
+      setError(t("att.chooseEmployee"));
+      return;
+    }
+    if (operation !== "void" && (!date || !time)) {
+      setError(t("att.chooseDateTime"));
       return;
     }
     setSaving(true);
@@ -1928,6 +2001,7 @@ function CorrectionRequestModal({
           proposedOccurredAt:
             operation === "void" ? null : tunisLocalToIso(occurredAt),
           reason: reason.trim(),
+          ...(direct ? { employeeId, apply: true } : {}),
         }),
       });
       const payload: unknown = await response.json();
@@ -1954,10 +2028,28 @@ function CorrectionRequestModal({
           <X size={18} />
         </button>
         <p className="eyebrow">{screenLabel(t, "Attendance")}</p>
-        <h2>{t("att.correctionTitle")}</h2>
+        <h2>{direct ? t("att.directTitle") : t("att.correctionTitle")}</h2>
         <p className="correction-copy">
-          {t("att.correctionBody")}
+          {direct ? t("att.directBody") : t("att.correctionBody")}
         </p>
+        {direct && (
+          <label className="form-label">
+            {t("admin.colEmployee")}
+            <select
+              value={employeeId}
+              onChange={(event) => setEmployeeId(event.target.value)}
+              disabled={Boolean(direct.employeeId)}
+              required
+            >
+              <option value="">{t("att.chooseEmployeeOption")}</option>
+              {direct.employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="form-label">
           {t("att.operation")}
           <select
@@ -1982,12 +2074,20 @@ function CorrectionRequestModal({
                 <option value="exit">{t("att.exit")}</option>
               </select>
             </label>
+          </div>
+        )}
+        {operation !== "void" && (
+          <div className="form-row">
             <label className="form-label">
-              {t("att.dateTime")}
+              {t("att.colDate")}
+              <DatePicker value={date} onChange={setDate} max={localIsoDate()} />
+            </label>
+            <label className="form-label">
+              {t("att.time")}
               <input
-                type="datetime-local"
-                value={occurredAt}
-                onChange={(event) => setOccurredAt(event.target.value)}
+                type="time"
+                value={time}
+                onChange={(event) => setTime(event.target.value)}
                 required
               />
             </label>
@@ -2014,10 +2114,42 @@ function CorrectionRequestModal({
           </button>
           <button className="primary-button" type="submit" disabled={saving}>
             {saving && <LoaderCircle className="spin" size={15} />}
-            {t("att.submitCorrection")}
+            {direct ? t("att.applyCorrection") : t("att.submitCorrection")}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/** "‹ Octobre 2026 ›" month selector, same look as the Payroll screen. */
+function MonthSwitcher({
+  value,
+  label,
+  onChange,
+}: {
+  value: string;
+  label: string;
+  onChange: (month: string) => void;
+}) {
+  const { t, dateLocale } = useLanguage();
+  const [year, month] = value.split("-").map(Number);
+  const shift = (delta: number) => {
+    const date = new Date(Date.UTC(year, month - 1 + delta, 1));
+    onChange(`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
+  const text = new Intl.DateTimeFormat(dateLocale, { month: "long", year: "numeric", timeZone: "UTC" }).format(
+    new Date(Date.UTC(year, month - 1, 1)),
+  );
+  return (
+    <div className="month-switcher" role="group" aria-label={label}>
+      <button type="button" className="icon-button" aria-label={t("common.previous")} onClick={() => shift(-1)}>
+        <ChevronLeft size={16} />
+      </button>
+      <span>{text}</span>
+      <button type="button" className="icon-button" aria-label={t("common.next")} onClick={() => shift(1)}>
+        <ChevronRight size={16} />
+      </button>
     </div>
   );
 }

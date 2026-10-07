@@ -13,6 +13,7 @@ import {
   type CorrectionOperation,
 } from "@/lib/attendance";
 import {
+  decideCorrection,
   listCorrectionRequests,
   requireAttendanceAuth,
 } from "@/lib/attendance-server";
@@ -113,6 +114,19 @@ export async function POST(request: Request) {
       .select("id")
       .single();
     if (error) throwAttendanceDatabaseError(error);
+
+    // Staff can correct directly: the request is approved at once, with the
+    // same checks, locking and audit trail as a reviewed correction.
+    if (body.apply === true && auth.isStaff) {
+      try {
+        const summary = await decideCorrection(auth, data.id, "approved", "Correction directe");
+        return NextResponse.json({ ...summary, id: data.id, status: "approved" }, { status: 201 });
+      } catch (applyError) {
+        // Do not leave a pending request behind when the change is invalid.
+        await decideCorrection(auth, data.id, "rejected", "Correction directe non appliquée").catch(() => null);
+        throw applyError;
+      }
+    }
     return NextResponse.json({ id: data.id, status: "pending" }, { status: 201 });
   } catch (error) {
     return attendanceErrorResponse(error);

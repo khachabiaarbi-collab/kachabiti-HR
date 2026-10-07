@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Check, ChevronRight, Loader2, Menu } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, Loader2, Menu, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AdminView } from "@/components/admin-views";
 import { EmployeeNav, EmployeeTabBar, Sidebar, TopActions } from "@/components/app-chrome";
@@ -60,16 +60,21 @@ const NOTICE_SELECTS = [
   "id, type, message, read, created_at, user_id",
 ];
 
+/** Notifications are loaded one page at a time (more on scroll). */
+const NOTICE_PAGE = 20;
+
 async function loadNotices(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  from = 0,
 ) {
   for (const select of NOTICE_SELECTS) {
     const { data, error } = await supabase
       .from("notifications")
       .select(select)
       .eq("user_id", userId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(from, from + NOTICE_PAGE - 1);
     if (!error) {
       return ((data ?? []) as unknown as NotificationRow[]).map(mapNotice);
     }
@@ -280,12 +285,16 @@ export default function Page() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [authorizations, setAuthorizations] = useState<Authorization[]>([]);
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const noticeTimer = useRef<number | null>(null);
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [showNotices, setShowNotices] = useState(false);
   const [noticeFocus, setNoticeFocus] = useState<NoticeFocus | null>(null);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [noticesHasMore, setNoticesHasMore] = useState(false);
+  const [unreadTotal, setUnreadTotal] = useState<number | null>(null);
+  const loadingMoreNotices = useRef(false);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -330,6 +339,8 @@ export default function Page() {
     setLeaveTypes(data.leaveTypes);
     setEvents(data.events);
     setNotices(data.notices);
+    setNoticesHasMore(data.notices.length === NOTICE_PAGE);
+    void refreshUnread();
     setAuthorizations(data.authorizations);
     setCurrentEmployee(data.currentEmployee);
   };
@@ -387,6 +398,7 @@ export default function Page() {
             filter: `user_id=eq.${user.id}`,
           },
           (payload) => {
+            void refreshUnread();
             if (payload.eventType === "INSERT" && payload.new) {
               const next = mapNotice(payload.new as NotificationRow);
               setNotices((current) => {
@@ -438,9 +450,47 @@ export default function Page() {
     window.location.replace("/login");
   };
 
-  const flash = (message: string) => {
-    setNotice(message);
-    setTimeout(() => setNotice(""), 2600);
+  // Errors stay longer than confirmations; a newer message replaces the last.
+  const flash = (message: string, tone: "success" | "error" = "success") => {
+    if (!message) return;
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    setNotice({ message, tone });
+    noticeTimer.current = window.setTimeout(() => setNotice(null), tone === "error" ? 6000 : 3500);
+  };
+
+  /** Unread total from the database, so the bell is right beyond the loaded page. */
+  const refreshUnread = async () => {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
+    if (!error) setUnreadTotal(count ?? 0);
+  };
+
+  const loadMoreNotices = async () => {
+    if (loadingMoreNotices.current || !noticesHasMore) return;
+    loadingMoreNotices.current = true;
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const page = await loadNotices(supabase, user.id, notices.length);
+      setNotices((current) => [
+        ...current,
+        ...page.filter((item) => !current.some((existing) => existing.id === item.id)),
+      ]);
+      setNoticesHasMore(page.length === NOTICE_PAGE);
+    } finally {
+      loadingMoreNotices.current = false;
+    }
   };
 
   const isEmployee = path.startsWith("/dashboard");
@@ -541,6 +591,10 @@ export default function Page() {
             employees={employees}
             requests={requests}
             onOpenNotice={openNotice}
+            unreadCount={unreadTotal}
+            hasMoreNotices={noticesHasMore}
+            onLoadMoreNotices={loadMoreNotices}
+            onNoticesChanged={refreshUnread}
             onOpenRequest={openSearchRequest}
           />
         </EmployeeNav>
@@ -592,6 +646,10 @@ export default function Page() {
               employees={employees}
               requests={requests}
               onOpenNotice={openNotice}
+            unreadCount={unreadTotal}
+            hasMoreNotices={noticesHasMore}
+            onLoadMoreNotices={loadMoreNotices}
+            onNoticesChanged={refreshUnread}
               onOpenRequest={openSearchRequest}
             />
           </header>
@@ -613,6 +671,10 @@ export default function Page() {
               employees={employees}
               requests={requests}
               onOpenNotice={openNotice}
+            unreadCount={unreadTotal}
+            hasMoreNotices={noticesHasMore}
+            onLoadMoreNotices={loadMoreNotices}
+            onNoticesChanged={refreshUnread}
               onOpenRequest={openSearchRequest}
             />
           </header>
@@ -670,9 +732,16 @@ export default function Page() {
       </main>
       {isEmployee && <EmployeeTabBar active={active} setActive={setActive} />}
       {notice && (
-        <div className="toast">
-          <Check size={17} />
-          {notice}
+        <div
+          className={`toast is-${notice.tone}`}
+          role={notice.tone === "error" ? "alert" : "status"}
+          aria-live={notice.tone === "error" ? "assertive" : "polite"}
+        >
+          {notice.tone === "error" ? <AlertCircle size={18} /> : <Check size={18} />}
+          <span>{notice.message}</span>
+          <button type="button" aria-label={t("toast.dismiss")} onClick={() => setNotice(null)}>
+            <X size={15} />
+          </button>
         </div>
       )}
       {modal === "request" && (
@@ -747,6 +816,7 @@ export default function Page() {
           balances={balances}
           vacation={vacation.figures?.get(selected.id) ?? null}
           canManagePayroll={role === "Admin"}
+          canManageAccounts={role === "Admin"}
           close={() => setSelected(null)}
           flash={flash}
           onSaved={(employee, nextSolde) => {
