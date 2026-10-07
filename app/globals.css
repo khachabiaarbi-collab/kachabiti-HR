@@ -114,7 +114,9 @@ button {
   width: 38px;
   height: 38px;
 }
-.mobile-menu {
+/* The drawer's close button only exists on phones; `.icon-button` sets
+   display later in the file, so this needs the extra specificity. */
+.sidebar .mobile-menu {
   display: none;
 }
 .workspace-switcher {
