@@ -7,6 +7,7 @@ import {
   filterOptionLabel,
   translateStatus,
   useT,
+  leaveTypeLabel,
 } from "@/lib/i18n";
 import { leaveTypeTone } from "@/lib/map-rows";
 
@@ -118,9 +119,10 @@ export function Status({ status }: { status: string }) {
 }
 
 export function LeaveTypeLabel({ type }: { type: string }) {
+  const t = useT();
   return (
     <span className={`status-pill type-pill ${leaveTypeTone(type)}`}>
-      {type}
+      {leaveTypeLabel(t, type)}
     </span>
   );
 }
@@ -346,7 +348,9 @@ export function FilterBar({
         >
           {filter.options.map((option) => (
             <option key={option} value={option}>
-              {filterOptionLabel(t, option)}
+              {filter.label === "Leave type" && option !== "All"
+                ? leaveTypeLabel(t, option)
+                : filterOptionLabel(t, option)}
             </option>
           ))}
         </select>
