@@ -488,6 +488,7 @@ export function EmployeeTimeClock({
           tone="teal"
           icon={<Timer size={19} />}
         />
+        <CountedTodayMetric attendance={attendance} />
         <Metric
           label={t("att.firstEntry")}
           value={formatTime(attendance.firstEntryAt)}
@@ -2204,5 +2205,27 @@ function CreditedCell({ item }: { item: AttendanceReportItem }) {
         </small>
       )}
     </span>
+  );
+}
+
+/** Employee time clock: today's time as it counts for pay and vacation. */
+function CountedTodayMetric({ attendance }: { attendance: AttendanceDaySummary }) {
+  const t = useT();
+  const credit = creditedForDay(attendance);
+  const marks = credit
+    ? [
+        credit.lateCount > 0 ? t("att.badgeLate") : "",
+        credit.earlyLeaveCount > 0 && attendance.state !== "present" ? t("att.badgeEarly") : "",
+        credit.overtimeMinutes > 0 ? `+${formatAttendanceDuration(credit.overtimeMinutes)} ${t("att.overtimeShort")}` : "",
+      ].filter(Boolean)
+    : [];
+  return (
+    <Metric
+      label={t("att.countedToday")}
+      value={credit ? formatAttendanceDuration(credit.creditedMinutes) : t("common.dash")}
+      note={!credit ? t("att.noScheduleToday") : marks.length ? marks.join(" · ") : t("att.countedNote")}
+      tone="indigo"
+      icon={<CheckCircle2 size={19} />}
+    />
   );
 }
