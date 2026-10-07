@@ -3232,7 +3232,7 @@ select {
 .attendance-report-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) 100px 120px 130px 95px 70px 24px;
+  grid-template-columns: minmax(160px, 1.4fr) 100px 120px 130px 85px 120px 60px 24px;
   align-items: center;
   gap: 12px;
   border: 0;
@@ -5016,4 +5016,39 @@ select option {
 .notification-more:disabled {
   color: #9ca3af;
   cursor: progress;
+}
+
+/* Attendance report: time counted with the quarter-hour rules */
+.credited-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.credited-cell b {
+  color: #1f3a8a;
+  font-variant-numeric: tabular-nums;
+}
+.credited-cell small {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.credited-cell em {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 700;
+}
+.credited-cell .is-late,
+.credited-cell .is-early {
+  color: #b45309;
+  background: #fef3c7;
+}
+.credited-cell .is-overtime {
+  color: #047857;
+  background: #ecfdf5;
+}
+.credited-cell.is-empty {
+  color: #94a3b8;
 }
