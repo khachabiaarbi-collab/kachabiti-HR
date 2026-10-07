@@ -30,6 +30,7 @@ import {
   translateRole,
   translateStatus,
   useLanguage,
+  leaveTypeLabel,
 } from "@/lib/i18n";
 import { isoDate } from "@/lib/map-rows";
 import { createClient } from "@/lib/supabase/client";
@@ -447,7 +448,7 @@ export function TopActions({
                 >
                   <FileText size={14} />
                   <span>
-                    <strong>{request.type}</strong>
+                    <strong>{leaveTypeLabel(t, request.type)}</strong>
                     <small>
                       {t("search.requestMeta", {
                         name: request.name,

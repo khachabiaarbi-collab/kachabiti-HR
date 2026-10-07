@@ -92,6 +92,7 @@ import {
   translateRole,
   useLanguage,
   useT,
+  leaveTypeLabel,
 } from "@/lib/i18n";
 
 async function persistLeaveDecision(
@@ -894,14 +895,12 @@ function People({
                             : ""
                       }`}
                       title={t("admin.balanceTitle", {
-                        type: displayLeaveType(balance.typeName),
+                        type: leaveTypeLabel(t, balance.typeName),
                         days: balance.daysRemaining,
                       })}
                     >
                       <span>
-                        {displayLeaveType(balance.typeName)
-                          .replace(/leave/i, "")
-                          .trim()}
+                        {leaveTypeLabel(t, balance.typeName)}
                       </span>
                       <b>
                         {balance.daysRemaining}
@@ -1846,6 +1845,7 @@ export function Calendar({
               approvedAuthz,
               employees,
               t("admin.legendAuthz"),
+              (name) => leaveTypeLabel(t, name),
             );
             return (
               <div
@@ -1902,6 +1902,7 @@ function dayAwayChips(
   auths: Authorization[],
   employees: Employee[],
   authzLabel: string,
+  typeLabel: (name: string) => string = (name) => name,
 ) {
   const leaveChips = leaves
     .filter((request) => request.startDate <= iso && request.endDate >= iso)
@@ -1912,8 +1913,8 @@ function dayAwayChips(
       return {
         id: `leave-${request.id}`,
         className: `leave-bar ${leaveTypeTone(request.type)}`,
-        label: `${firstName(name)} · ${request.type}`,
-        title: `${name} · ${request.type} · ${request.dates}`,
+        label: `${firstName(name)} · ${typeLabel(request.type)}`,
+        title: `${name} · ${typeLabel(request.type)} · ${request.dates}`,
       };
     });
   const authzChips = auths
@@ -2113,7 +2114,7 @@ function SettingsView({
               leaveTypes.map((type) => (
                 <Field
                   key={type.id}
-                  label={displayLeaveType(type.name)}
+                  label={leaveTypeLabel(t, type.name)}
                   value={t("admin.policyDays", { days: type.defaultDays })}
                   readOnly
                 />

@@ -59,6 +59,7 @@ import {
   translateStatus,
   useLanguage,
   useT,
+  leaveTypeLabel,
 } from "@/lib/i18n";
 
 export function RequestModal({
@@ -295,7 +296,7 @@ export function RequestModal({
             )}
             {leaveTypes.map((type) => (
               <option key={type.id} value={type.id}>
-                {displayLeaveType(type.name)}
+                {leaveTypeLabel(t, type.name)}
               </option>
             ))}
           </select>
@@ -1184,7 +1185,7 @@ export function EmployeeDetail({
               solde.map((row, index) => (
                 <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
                   <span>
-                    {row.typeName}
+                    {leaveTypeLabel(t, row.typeName)}
                     {isAnnualLeaveType({ name: row.typeName }) && (
                       <small className="solde-opening-label">{t("panel.openingLabel")}</small>
                     )}
@@ -1387,7 +1388,7 @@ export function RequestDetail({
           <p className="eyebrow">{t("panel.requestDetails")}</p>
           <div className="detail-row">
             <span>{t("modal.leaveType")}</span>
-            <b>{request.type}</b>
+            <b>{leaveTypeLabel(t, request.type)}</b>
           </div>
           <div className="detail-row">
             <span>{t("modal.startDate")}</span>

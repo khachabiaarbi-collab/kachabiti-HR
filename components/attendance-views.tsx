@@ -30,6 +30,7 @@ import {
 
 import { Header, Metric } from "@/components/primitives";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
+import { creditDay, type DayCredit } from "@/lib/payroll-calc";
 import {
   formatLeaveDayCount,
   type LeaveHourTeamItem,
@@ -108,6 +109,35 @@ async function fetchToday(signal?: AbortSignal, fallback?: string) {
 
 function formatTime(value: string | null) {
   return value ? timeFormatter.format(new Date(value)) : "—";
+}
+
+const tunisClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: ATTENDANCE_TIMEZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * Time that counts for pay and vacation (quarter-hour rules, inside the
+ * schedule, authorizations included); the raw punched time is workedMinutes.
+ */
+function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
+  const segments = item.scheduleSegments
+    .filter((segment) => segment.kind === "work")
+    .map((segment) => ({ start: segment.startTime.slice(0, 5), end: segment.endTime.slice(0, 5) }));
+  if (!segments.length) return null;
+  const today = localIsoDate();
+  const sessions = item.sessions.map((session) => ({
+    in: tunisClock.format(new Date(session.entryAt)),
+    out: session.exitAt ? tunisClock.format(new Date(session.exitAt)) : null,
+  }));
+  const authorizations = item.authorizations.map((authorization) => ({
+    start: authorization.startTime.slice(0, 5),
+    end: authorization.endTime.slice(0, 5),
+  }));
+  const now = item.workDate === today ? tunisClock.format(new Date()) : null;
+  return creditDay(segments, sessions, authorizations, now);
 }
 
 function datetimeLocalValue(value: string) {
@@ -458,6 +488,7 @@ export function EmployeeTimeClock({
           tone="teal"
           icon={<Timer size={19} />}
         />
+        <CountedTodayMetric attendance={attendance} />
         <Metric
           label={t("att.firstEntry")}
           value={formatTime(attendance.firstEntryAt)}
@@ -1119,6 +1150,7 @@ export function AdminAttendance({
                 <span>{t("filter.status")}</span>
                 <span>{t("att.colFirstLast")}</span>
                 <span>{t("att.colWorked")}</span>
+                <span title={t("att.creditedHint")}>{t("att.colCredited")}</span>
                 <span>{t("att.sessions")}</span>
                 <span />
               </div>
@@ -1158,6 +1190,7 @@ export function AdminAttendance({
                         {formatTime(item.firstEntryAt)} / {formatTime(item.lastExitAt)}
                       </span>
                       <span>{formatAttendanceDuration(item.workedMinutes)}</span>
+                      <CreditedCell item={item} />
                       <span>{item.sessionsStarted}</span>
                       <span>
                         {expandedId === `${item.employeeId}:${item.workDate}` ? (
@@ -2151,5 +2184,48 @@ function MonthSwitcher({
         <ChevronRight size={16} />
       </button>
     </div>
+  );
+}
+
+/** Report cell: counted time, with late arrival / early departure / overtime marks. */
+function CreditedCell({ item }: { item: AttendanceReportItem }) {
+  const t = useT();
+  const credit = creditedForDay(item);
+  if (!credit) return <span className="credited-cell is-empty">{t("common.dash")}</span>;
+  return (
+    <span className="credited-cell" title={t("att.creditedHint")}>
+      <b>{formatAttendanceDuration(credit.creditedMinutes)}</b>
+      {(credit.lateCount > 0 || credit.earlyLeaveCount > 0 || credit.overtimeMinutes > 0) && (
+        <small>
+          {credit.lateCount > 0 && <em className="is-late">{t("att.badgeLate")}</em>}
+          {credit.earlyLeaveCount > 0 && <em className="is-early">{t("att.badgeEarly")}</em>}
+          {credit.overtimeMinutes > 0 && (
+            <em className="is-overtime">+{formatAttendanceDuration(credit.overtimeMinutes)}</em>
+          )}
+        </small>
+      )}
+    </span>
+  );
+}
+
+/** Employee time clock: today's time as it counts for pay and vacation. */
+function CountedTodayMetric({ attendance }: { attendance: AttendanceDaySummary }) {
+  const t = useT();
+  const credit = creditedForDay(attendance);
+  const marks = credit
+    ? [
+        credit.lateCount > 0 ? t("att.badgeLate") : "",
+        credit.earlyLeaveCount > 0 && attendance.state !== "present" ? t("att.badgeEarly") : "",
+        credit.overtimeMinutes > 0 ? `+${formatAttendanceDuration(credit.overtimeMinutes)} ${t("att.overtimeShort")}` : "",
+      ].filter(Boolean)
+    : [];
+  return (
+    <Metric
+      label={t("att.countedToday")}
+      value={credit ? formatAttendanceDuration(credit.creditedMinutes) : t("common.dash")}
+      note={!credit ? t("att.noScheduleToday") : marks.length ? marks.join(" · ") : t("att.countedNote")}
+      tone="indigo"
+      icon={<CheckCircle2 size={19} />}
+    />
   );
 }

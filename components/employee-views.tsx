@@ -68,7 +68,9 @@ import {
 } from "@/lib/map-rows";
 import { uploadEmployeeAvatar } from "@/lib/employee-avatar";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
-import { translateRole, translateStatus, useLanguage, useT } from "@/lib/i18n";
+import { translateRole, translateStatus, useLanguage, useT,
+  leaveTypeLabel,
+} from "@/lib/i18n";
 import { useLeaveHourBalance } from "@/lib/use-leave-hours";
 import { createClient } from "@/lib/supabase/client";
 
@@ -740,7 +742,7 @@ export function EmployeeView({
                   <li key={type.id}>
                     <div className="exceptional-leave-copy">
                       <b lang="ar" dir="rtl">
-                        {type.name}
+                        {leaveTypeLabel(t, type.name)}
                       </b>
                       <span className={remaining > 0 ? "is-remaining" : "is-used-up"}>
                         {remaining === 1
