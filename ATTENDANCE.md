@@ -23,7 +23,7 @@ UTC `timestamptz` values and displayed in Tunis time.
 
 - Work days: Monday through Friday, plus Saturday morning
 - Weekday segments: 08:00–12:00 and 13:00–17:00
-- Saturday: 08:00–13:00
+- Saturday: 08:00–13:30
 - Normal break: 12:00–13:00
 - Grace period: 5 minutes
 - Maximum sessions: 5 per employee per day
@@ -98,6 +98,16 @@ Approval and rejection notify the employee. Opening an attendance notice takes
 staff to **Attendance → Correction requests** and employees to **Time clock**.
 Immediate punch results still use the toast only.
 
+## Direct corrections (staff)
+
+Administrators and managers can correct attendance without waiting for a
+request: **Attendance → Records**, open a day, then edit or remove a punch or
+add one; **Correct attendance** above the table covers days with no punch.
+The correction is created and approved in one step (`apply: true` on
+`POST /api/attendance/correction-requests`), with the same chronology checks,
+locking and audit trail as a reviewed request. If it is invalid it is rejected
+and nothing changes.
+
 ## Admin attendance view
 
 The **Attendance** screen is available to `admin` and `manager` roles.
@@ -134,6 +144,29 @@ Attendance and hour-based authorizations remain separate records.
   summaries for HR review.
 - Attendance does not change authorization balances or vacation deductions.
 - Raw punch times are always preserved.
+
+## Payroll and discipline rules
+
+Payroll reads attendance through `payroll_attendance_month()` (in
+`supabase/payroll.sql`) and counts time with these rules
+(`creditDay` / `summarizeClockMonth` in `lib/payroll-calc.ts`):
+
+- Time counts in quarter hours and only inside the scheduled work segments.
+- An entry moves up to the next quarter: 07:55 counts from 08:00, 08:01 or
+  08:10 from 08:15. There is no tolerance.
+- An exit moves down to the previous quarter (16:50 → 16:45) and never counts
+  past the end of the schedule (17:05 or 17:30 → 17:00).
+- The same applies after the break (back at 13:05 → counts from 13:15).
+- Approved authorizations count as worked time; arriving after the end of the
+  authorization follows the same quarter rule.
+- Overtime is time after the end of the schedule, counted only when the full
+  day was earned and the extra reaches one hour (left at 18:00 after a full
+  day → 1 h). It is paid at the overtime rate.
+- Public holidays and approved paid leave are paid; unpaid leave is not.
+
+Monthly salaries are paid per hour: salary × credited hours ÷ scheduled hours
+of the month. The payslip panel shows hours paid, hours not worked, overtime,
+late arrivals and early departures.
 
 ## Database objects
 

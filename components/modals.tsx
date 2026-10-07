@@ -51,6 +51,8 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
+import { updateEmployeeAccount } from "@/lib/employee-account";
+import type { VacationFigure } from "@/lib/use-leave-hours";
 import {
   formatDaysLabel,
   translateRole,
@@ -73,7 +75,7 @@ export function RequestModal({
   requests?: LeaveRequest[];
   employeeId: string | null;
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSubmitted: () => void | Promise<void>;
 }) {
   const [leaveTypeId, setLeaveTypeId] = useState(
@@ -160,37 +162,37 @@ export function RequestModal({
   const submit = async () => {
     if (saving) return;
     if (!leaveTypeId) {
-      flash(t("modal.chooseType"));
+      flash(t("modal.chooseType"), "error");
       return;
     }
     if (!startDate || !endDate) {
-      flash(t("modal.chooseDates"));
+      flash(t("modal.chooseDates"), "error");
       return;
     }
     if (endDate < startDate) {
-      flash(t("modal.endAfterStart"));
+      flash(t("modal.endAfterStart"), "error");
       return;
     }
     if (sick && startDate < sickLeaveMinIsoDate()) {
-      flash(t("modal.sick48h"));
+      flash(t("modal.sick48h"), "error");
       return;
     }
     if (parental && firstParental?.status === "Pending") {
-      flash(t("modal.parentalPending"));
+      flash(t("modal.parentalPending"), "error");
       return;
     }
     if (secondParental) {
       if (startDate !== secondStart) {
-        flash(t("modal.parentalSecondStart"));
+        flash(t("modal.parentalSecondStart"), "error");
         return;
       }
       if (endDate > parentalEnd) {
-        flash(t("modal.parentalSecondMax"));
+        flash(t("modal.parentalSecondMax"), "error");
         return;
       }
       const deadline = shiftCalendarMonths(firstParental.endDate, -1);
       if (deadline && isoDate() > deadline) {
-        flash(t("modal.parentalDeadline"));
+        flash(t("modal.parentalDeadline"), "error");
         return;
       }
     }
@@ -202,7 +204,7 @@ export function RequestModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash(t("profile.mustSignIn"));
+      flash(t("profile.mustSignIn"), "error");
       return;
     }
 
@@ -214,7 +216,7 @@ export function RequestModal({
       const uploaded = await uploadLeaveAttachment(payload);
       if (uploaded.error) {
         setSaving(false);
-        flash(uploaded.error);
+        flash(uploaded.error, "error");
         return;
       }
       attachmentPath = uploaded.path;
@@ -234,7 +236,7 @@ export function RequestModal({
 
     if (error) {
       setSaving(false);
-      flash(error.message);
+      flash(error.message, "error");
       return;
     }
 
@@ -243,7 +245,13 @@ export function RequestModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <form
         className="modal card"
         onSubmit={(event) => {
@@ -356,7 +364,7 @@ export function AuthorizationModal({
   currentEmployeeId,
 }: {
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSubmitted: () => void | Promise<void>;
   authorizations: Authorization[];
   currentEmployeeId: string | null;
@@ -381,19 +389,19 @@ export function AuthorizationModal({
   const submit = async () => {
     if (saving) return;
     if (!date) {
-      flash(t("modal.chooseDate"));
+      flash(t("modal.chooseDate"), "error");
       return;
     }
     if (!startTime || !endTime) {
-      flash(t("modal.chooseTimes"));
+      flash(t("modal.chooseTimes"), "error");
       return;
     }
     if (durationMinutes <= 0) {
-      flash(t("modal.endTimeAfter"));
+      flash(t("modal.endTimeAfter"), "error");
       return;
     }
     if (!reason.trim()) {
-      flash(t("modal.addReason"));
+      flash(t("modal.addReason"), "error");
       return;
     }
 
@@ -404,7 +412,7 @@ export function AuthorizationModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
-      flash(t("profile.mustSignIn"));
+      flash(t("profile.mustSignIn"), "error");
       return;
     }
 
@@ -420,7 +428,7 @@ export function AuthorizationModal({
 
     if (error) {
       setSaving(false);
-      flash(error.message);
+      flash(error.message, "error");
       return;
     }
 
@@ -429,7 +437,13 @@ export function AuthorizationModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <form
         className="modal card"
         onSubmit={(event) => {
@@ -515,7 +529,7 @@ export function EventModal({
   onSaved,
 }: {
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSaved: () => void | Promise<void>;
 }) {
   const [title, setTitle] = useState("");
@@ -528,15 +542,15 @@ export function EventModal({
   const submit = async () => {
     if (saving) return;
     if (!title.trim()) {
-      flash(t("modal.addEventTitle"));
+      flash(t("modal.addEventTitle"), "error");
       return;
     }
     if (!startDate || !endDate) {
-      flash(t("modal.chooseDates"));
+      flash(t("modal.chooseDates"), "error");
       return;
     }
     if (endDate < startDate) {
-      flash(t("modal.endAfterStart"));
+      flash(t("modal.endAfterStart"), "error");
       return;
     }
     setSaving(true);
@@ -549,7 +563,7 @@ export function EventModal({
     });
     if (error) {
       setSaving(false);
-      flash(error.message);
+      flash(error.message, "error");
       return;
     }
     await onSaved();
@@ -557,7 +571,13 @@ export function EventModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <form
         className="modal card"
         onSubmit={(event) => {
@@ -617,7 +637,7 @@ export function DepartmentModal({
   employees: Employee[];
   department?: Department | null;
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSaved: () => void | Promise<void>;
 }) {
   const [name, setName] = useState(department?.name ?? "");
@@ -629,7 +649,7 @@ export function DepartmentModal({
   const submit = async () => {
     if (saving) return;
     if (!name.trim()) {
-      flash(t("modal.addDeptName"));
+      flash(t("modal.addDeptName"), "error");
       return;
     }
     setSaving(true);
@@ -643,7 +663,7 @@ export function DepartmentModal({
       : await supabase.from("departments").insert(payload);
     if (error) {
       setSaving(false);
-      flash(error.message);
+      flash(error.message, "error");
       return;
     }
     await onSaved();
@@ -651,7 +671,13 @@ export function DepartmentModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <form
         className="modal card"
         onSubmit={(event) => {
@@ -713,7 +739,7 @@ export function EmployeeModal({
 }: {
   departments: Department[];
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onInvited: () => void | Promise<void>;
 }) {
   const [name, setName] = useState("");
@@ -731,7 +757,7 @@ export function EmployeeModal({
   const submit = async () => {
     if (saving) return;
     if (!name.trim() || !email.trim()) {
-      flash(t("modal.nameEmailRequired"));
+      flash(t("modal.nameEmailRequired"), "error");
       return;
     }
 
@@ -747,7 +773,7 @@ export function EmployeeModal({
     });
     if (error) {
       setSaving(false);
-      flash(error);
+      flash(error, "error");
       return;
     }
 
@@ -756,7 +782,13 @@ export function EmployeeModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <form
         className="modal card"
         onSubmit={(event) => {
@@ -849,7 +881,9 @@ export function EmployeeDetail({
   departments,
   leaveTypes,
   balances = [],
+  vacation = null,
   canManagePayroll = false,
+  canManageAccounts = false,
   close,
   flash,
   onSaved,
@@ -858,9 +892,13 @@ export function EmployeeDetail({
   departments: Department[];
   leaveTypes: LeaveType[];
   balances?: LeaveBalance[];
+  /** Ledger + time-clock accrual, from the vacation balance service. */
+  vacation?: VacationFigure | null;
   canManagePayroll?: boolean;
+  /** Admin: change the sign-in email and password. */
+  canManageAccounts?: boolean;
   close: () => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   onSaved: (employee: Employee, balances: LeaveBalance[]) => void;
 }) {
   const [name, setName] = useState(employee.name);
@@ -892,7 +930,24 @@ export function EmployeeDetail({
     ),
   );
   const [saving, setSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
   const t = useT();
+  const { dateLocale } = useLanguage();
+
+  const changePassword = async () => {
+    if (savingPassword) return;
+    if (newPassword.length < 8) return flash(t("panel.passwordShort"), "error");
+    if (newPassword !== confirmPassword) return flash(t("panel.passwordMismatch"), "error");
+    setSavingPassword(true);
+    const message = await updateEmployeeAccount({ employeeId: employee.id, password: newPassword });
+    setSavingPassword(false);
+    if (message) return flash(message, "error");
+    setNewPassword("");
+    setConfirmPassword("");
+    flash(t("panel.passwordChanged", { name: employee.name }));
+  };
 
   const applyHireSolde = (nextStart: string, nextMonthly: string) => {
     setStartDate(nextStart);
@@ -934,6 +989,15 @@ export function EmployeeDetail({
   const save = async () => {
     if (!name.trim() || !email.trim() || saving) return;
     setSaving(true);
+    // The sign-in email lives in Supabase Auth: change it there first.
+    if (canManageAccounts && email.trim().toLowerCase() !== employee.email.trim().toLowerCase()) {
+      const message = await updateEmployeeAccount({ employeeId: employee.id, email: email.trim() });
+      if (message) {
+        setSaving(false);
+        flash(message, "error");
+        return;
+      }
+    }
     const supabase = createClient();
     const departmentName =
       departments.find((department) => department.id === departmentId)?.name ??
@@ -967,7 +1031,7 @@ export function EmployeeDetail({
 
     if (employeeError) {
       setSaving(false);
-      flash(employeeError.message);
+      flash(employeeError.message, "error");
       return;
     }
 
@@ -983,7 +1047,7 @@ export function EmployeeDetail({
 
       if (soldeError) {
         setSaving(false);
-        flash(soldeError.message);
+        flash(soldeError.message, "error");
         return;
       }
     }
@@ -1008,129 +1072,175 @@ export function EmployeeDetail({
   };
 
   return (
-    <div className="side-panel">
-      <button type="button" className="panel-close" onClick={close}>
-        <X size={18} />
-      </button>
-      <Avatar e={employee} />
-      <h2>{name || employee.name}</h2>
-      <p>
-        {displayValue(jobTitle)} · {employee.department}
-      </p>
-      <div className="employee-edit-form">
-        <div className="detail-block">
-          <p className="eyebrow">{t("panel.details")}</p>
-          <Field label={t("profile.fullName")} name="full_name" value={name} onChange={setName} />
-          <Field label={t("profile.workEmail")} name="email" value={email} onChange={setEmail} />
-          <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
-          <Field label={t("profile.jobTitle")} name="job_title" value={jobTitle} onChange={setJobTitle} />
-          <label className="form-label">
-            {t("profile.department")}
-            <select
-              name="department_id"
-              value={departmentId}
-              onChange={(event) => setDepartmentId(event.target.value)}
-            >
-              <option value="">{t("department.unassigned")}</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.id}>
-                  {department.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-label">
-            {t("profile.role")}
-            <select
-              name="role"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-            >
-              <option value="Employee">{translateRole(t, "Employee")}</option>
-              <option value="Manager">{translateRole(t, "Manager")}</option>
-              <option value="Administrator">{translateRole(t, "Administrator")}</option>
-            </select>
-          </label>
-          <label className="form-label">
-            {t("profile.status")}
-            <select
-              name="status"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-            >
-              <option value="Active">{translateStatus(t, "Active")}</option>
-              <option value="Inactive">{translateStatus(t, "Inactive")}</option>
-            </select>
-          </label>
-          <Field
-            label={t("profile.startDate")}
-            name="start_date"
-            type="date"
-            value={startDate}
-            onChange={(value) => applyHireSolde(value, monthlyLeaveDays)}
-          />
-          <Field
-            label={t("profile.monthlyDays")}
-            name="monthly_leave_days"
-            type="number"
-            step="0.01"
-            value={monthlyLeaveDays}
-            onChange={(value) => applyHireSolde(startDate, value)}
-          />
-        </div>
-        <div className="detail-block">
-          <p className="eyebrow">{t("panel.solde")}</p>
-          <p className="page-subtitle">{t("panel.soldeNote")}</p>
-          {solde.length === 0 ? (
-            <span>{t("panel.noTypes")}</span>
-          ) : (
-            solde.map((row, index) => (
-              <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
-                <span>{row.typeName}</span>
-                <div>
-                  <button
-                    type="button"
-                    aria-label={t("panel.decrease", { name: row.typeName })}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      bumpSolde(index, -1);
-                    }}
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <input
-                    type="number"
-                    name={`solde-${row.leaveTypeId || index}`}
-                    step={1}
-                    value={row.daysRemaining}
-                    onChange={(event) => setSoldeValue(index, event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") event.preventDefault();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    aria-label={t("panel.increase", { name: row.typeName })}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      bumpSolde(index, 1);
-                    }}
-                  >
-                    <Plus size={14} />
-                  </button>
+    <>
+      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
+      <div className="side-panel">
+        <button type="button" className="panel-close" onClick={close}>
+          <X size={18} />
+        </button>
+        <Avatar e={employee} />
+        <h2>{name || employee.name}</h2>
+        <p>
+          {displayValue(jobTitle)} · {employee.department}
+        </p>
+        <div className="employee-edit-form">
+          <div className="detail-block">
+            <p className="eyebrow">{t("panel.details")}</p>
+            <Field label={t("profile.fullName")} name="full_name" value={name} onChange={setName} />
+            <Field
+              label={t("profile.workEmail")}
+              name="email"
+              value={email}
+              onChange={canManageAccounts ? setEmail : undefined}
+              readOnly={!canManageAccounts}
+            />
+            {canManageAccounts && <span className="contract-hint">{t("panel.emailNote")}</span>}
+            <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
+            <Field label={t("profile.jobTitle")} name="job_title" value={jobTitle} onChange={setJobTitle} />
+            <label className="form-label">
+              {t("profile.department")}
+              <select
+                name="department_id"
+                value={departmentId}
+                onChange={(event) => setDepartmentId(event.target.value)}
+              >
+                <option value="">{t("department.unassigned")}</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-label">
+              {t("profile.role")}
+              <select
+                name="role"
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+              >
+                <option value="Employee">{translateRole(t, "Employee")}</option>
+                <option value="Manager">{translateRole(t, "Manager")}</option>
+                <option value="Administrator">{translateRole(t, "Administrator")}</option>
+              </select>
+            </label>
+            <label className="form-label">
+              {t("profile.status")}
+              <select
+                name="status"
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+              >
+                <option value="Active">{translateStatus(t, "Active")}</option>
+                <option value="Inactive">{translateStatus(t, "Inactive")}</option>
+              </select>
+            </label>
+            <Field
+              label={t("profile.startDate")}
+              name="start_date"
+              type="date"
+              value={startDate}
+              onChange={(value) => applyHireSolde(value, monthlyLeaveDays)}
+            />
+            <Field
+              label={t("profile.monthlyDays")}
+              name="monthly_leave_days"
+              type="number"
+              step="0.01"
+              value={monthlyLeaveDays}
+              onChange={(value) => applyHireSolde(startDate, value)}
+            />
+            <span className="contract-hint">{t("panel.rateNote")}</span>
+          </div>
+          {canManageAccounts && (
+            <div className="detail-block">
+              <p className="eyebrow">{t("panel.accountTitle")}</p>
+              <span className="contract-hint">{t("panel.accountNote")}</span>
+              <Field
+                label={t("panel.newPassword")}
+                name="new_password"
+                type="password"
+                value={newPassword}
+                onChange={setNewPassword}
+              />
+              <Field
+                label={t("panel.confirmPassword")}
+                name="confirm_password"
+                type="password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+              />
+              <Button secondary onClick={() => void changePassword()}>
+                {savingPassword ? t("modal.saving") : t("panel.setPassword")}
+              </Button>
+            </div>
+          )}
+          <div className="detail-block">
+            <p className="eyebrow">{t("panel.solde")}</p>
+            <p className="page-subtitle">{t("panel.soldeNote")}</p>
+            {solde.length === 0 ? (
+              <span>{t("panel.noTypes")}</span>
+            ) : (
+              solde.map((row, index) => (
+                <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
+                  <span>
+                    {row.typeName}
+                    {isAnnualLeaveType({ name: row.typeName }) && (
+                      <small className="solde-opening-label">{t("panel.openingLabel")}</small>
+                    )}
+                  </span>
+                  <div>
+                    <button
+                      type="button"
+                      aria-label={t("panel.decrease", { name: row.typeName })}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        bumpSolde(index, -1);
+                      }}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <input
+                      type="number"
+                      name={`solde-${row.leaveTypeId || index}`}
+                      step={1}
+                      value={row.daysRemaining}
+                      onChange={(event) => setSoldeValue(index, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.preventDefault();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={t("panel.increase", { name: row.typeName })}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        bumpSolde(index, 1);
+                      }}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
                 </div>
+              ))
+            )}
+            {vacation && (
+              <div className="solde-accrual">
+                <div><span>{t("panel.accrualEarned")}</span><b>{formatLeaveDayCount(vacation.earnedDays ?? 0, dateLocale)} {t("panel.daysShort")}</b></div>
+                <div className="is-total"><span>{t("panel.accrualTotal")}</span><b>{formatLeaveDayCount(vacation.balanceDays, dateLocale)} {t("panel.daysShort")}</b></div>
+                <small>{t("panel.accrualNote")}</small>
               </div>
-            ))
+            )}
+          </div>
+          <Button onClick={() => void save()}>
+            {saving ? t("modal.saving") : t("panel.saveChanges")}
+          </Button>
+          {canManagePayroll && (
+            <ContractSection employeeId={employee.id} flash={flash} />
           )}
         </div>
-        <Button onClick={() => void save()}>
-          {saving ? t("modal.saving") : t("panel.saveChanges")}
-        </Button>
-        {canManagePayroll && (
-          <ContractSection employeeId={employee.id} flash={flash} />
-        )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1225,165 +1335,168 @@ export function RequestDetail({
   }, [request.attachmentPath]);
 
   return (
-    <div className="side-panel request-detail">
-      <button type="button" className="panel-close" onClick={close}>
-        <X size={18} />
-      </button>
-      <Avatar e={person} />
-      <h2>{request.name}</h2>
-      <p>
-        {displayValue(employee?.jobTitle)} · {request.department}
-      </p>
-      <Status status={request.status} />
-      {advance && (
-        <p className="solde-alert" role="alert">
-          {alreadyApproved
-            ? t("panel.noSoldeApproved", { days: soldeActuel ?? 0 })
-            : t("panel.noSoldeAdvance", {
-                remaining: soldeActuel ?? 0,
-                next: nextSolde ?? 0,
-              })}
+    <>
+      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
+      <div className="side-panel request-detail">
+        <button type="button" className="panel-close" onClick={close}>
+          <X size={18} />
+        </button>
+        <Avatar e={person} />
+        <h2>{request.name}</h2>
+        <p>
+          {displayValue(employee?.jobTitle)} · {request.department}
         </p>
-      )}
-      {sick && (
-        <p className="leave-policy-alert" role="status">
-          <b>{t("modal.sickPolicy")}</b>
-          {t("panel.sickReview")}
-        </p>
-      )}
-      {parental && (
-        <p className="leave-policy-alert" role="status">
-          <b>{t("modal.parentalPolicy")}</b>
-          {t("panel.parentalReview")}
-        </p>
-      )}
-      <div className="request-solde">
-        <div>
-          <span>{t("panel.currentBalance")}</span>
-          <b>{daysLabel(t, soldeActuel)}</b>
-        </div>
-        <div>
-          <span>{t("panel.total")}</span>
-          <b>{daysLabel(t, total)}</b>
-        </div>
-        <div>
-          <span>{t("panel.duration")}</span>
-          <b>{request.days}</b>
-        </div>
-      </div>
-      <div className="detail-block">
-        <p className="eyebrow">{t("panel.requestDetails")}</p>
-        <div className="detail-row">
-          <span>{t("modal.leaveType")}</span>
-          <b>{request.type}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("modal.startDate")}</span>
-          <b>{formatDisplayDate(request.startDate, dateLocale)}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("modal.endDate")}</span>
-          <b>{formatDisplayDate(request.endDate, dateLocale)}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.duration")}</span>
-          <b>{request.days}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.submitted")}</span>
-          <b>
-            {request.createdAt
-              ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : t("common.dash")}
-          </b>
-        </div>
-        {approverName && (
-          <div className="detail-row">
-            <span>{t("panel.reviewedBy")}</span>
-            <b>{approverName}</b>
-          </div>
+        <Status status={request.status} />
+        {advance && (
+          <p className="solde-alert" role="alert">
+            {alreadyApproved
+              ? t("panel.noSoldeApproved", { days: soldeActuel ?? 0 })
+              : t("panel.noSoldeAdvance", {
+                  remaining: soldeActuel ?? 0,
+                  next: nextSolde ?? 0,
+                })}
+          </p>
         )}
-        {employee?.email && (
-          <div className="detail-row">
-            <span>{t("profile.workEmail")}</span>
-            <b>{employee.email}</b>
-          </div>
+        {sick && (
+          <p className="leave-policy-alert" role="status">
+            <b>{t("modal.sickPolicy")}</b>
+            {t("panel.sickReview")}
+          </p>
         )}
-        <div className="detail-reason">
-          <span>{t("modal.reason")}</span>
-          <p>{displayValue(request.reason)}</p>
+        {parental && (
+          <p className="leave-policy-alert" role="status">
+            <b>{t("modal.parentalPolicy")}</b>
+            {t("panel.parentalReview")}
+          </p>
+        )}
+        <div className="request-solde">
+          <div>
+            <span>{t("panel.currentBalance")}</span>
+            <b>{daysLabel(t, soldeActuel)}</b>
+          </div>
+          <div>
+            <span>{t("panel.total")}</span>
+            <b>{daysLabel(t, total)}</b>
+          </div>
+          <div>
+            <span>{t("panel.duration")}</span>
+            <b>{request.days}</b>
+          </div>
         </div>
-        <div className="detail-row">
-          <span>{t("modal.attachment")}</span>
-          {request.attachmentPath ? (
-            attachmentUrl ? (
-              <a
-                className="detail-attachment"
-                href={attachmentUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Paperclip size={12} />
-                {request.attachmentName || t("panel.viewFile")}
-              </a>
-            ) : (
-              <b>{request.attachmentName || t("panel.attached")}</b>
-            )
-          ) : (
-            <b>{t("common.dash")}</b>
+        <div className="detail-block">
+          <p className="eyebrow">{t("panel.requestDetails")}</p>
+          <div className="detail-row">
+            <span>{t("modal.leaveType")}</span>
+            <b>{request.type}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("modal.startDate")}</span>
+            <b>{formatDisplayDate(request.startDate, dateLocale)}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("modal.endDate")}</span>
+            <b>{formatDisplayDate(request.endDate, dateLocale)}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.duration")}</span>
+            <b>{request.days}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.submitted")}</span>
+            <b>
+              {request.createdAt
+                ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : t("common.dash")}
+            </b>
+          </div>
+          {approverName && (
+            <div className="detail-row">
+              <span>{t("panel.reviewedBy")}</span>
+              <b>{approverName}</b>
+            </div>
           )}
+          {employee?.email && (
+            <div className="detail-row">
+              <span>{t("profile.workEmail")}</span>
+              <b>{employee.email}</b>
+            </div>
+          )}
+          <div className="detail-reason">
+            <span>{t("modal.reason")}</span>
+            <p>{displayValue(request.reason)}</p>
+          </div>
+          <div className="detail-row">
+            <span>{t("modal.attachment")}</span>
+            {request.attachmentPath ? (
+              attachmentUrl ? (
+                <a
+                  className="detail-attachment"
+                  href={attachmentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Paperclip size={12} />
+                  {request.attachmentName || t("panel.viewFile")}
+                </a>
+              ) : (
+                <b>{request.attachmentName || t("panel.attached")}</b>
+              )
+            ) : (
+              <b>{t("common.dash")}</b>
+            )}
+          </div>
         </div>
+        {request.status === "Pending" && onApprove && onReject && (
+          <div className="request-detail-actions">
+            <Button type="button" secondary onClick={() => setConfirmReject(true)}>
+              {busy ? t("panel.pleaseWait") : t("common.reject")}
+            </Button>
+            <Button type="button" onClick={() => setConfirmApprove(true)}>
+              {busy ? t("panel.pleaseWait") : t("common.approve")}
+            </Button>
+          </div>
+        )}
+        {confirmApprove && onApprove && (
+          <ConfirmModal
+            title={t("admin.approveTitle")}
+            message={t("admin.approveLeave", {
+              name: request.name,
+              type: request.type,
+              dates: request.dates,
+            })}
+            confirmLabel={t("common.approve")}
+            cancelLabel={t("admin.goBack")}
+            danger={false}
+            close={() => setConfirmApprove(false)}
+            confirm={async () => {
+              await onApprove();
+              setConfirmApprove(false);
+            }}
+          />
+        )}
+        {confirmReject && onReject && (
+          <ConfirmModal
+            title={t("admin.rejectTitle")}
+            message={t("admin.rejectLeave", {
+              name: request.name,
+              type: request.type,
+              dates: request.dates,
+            })}
+            confirmLabel={t("common.reject")}
+            cancelLabel={t("admin.goBack")}
+            close={() => setConfirmReject(false)}
+            confirm={async () => {
+              await onReject();
+              setConfirmReject(false);
+            }}
+          />
+        )}
       </div>
-      {request.status === "Pending" && onApprove && onReject && (
-        <div className="request-detail-actions">
-          <Button type="button" secondary onClick={() => setConfirmReject(true)}>
-            {busy ? t("panel.pleaseWait") : t("common.reject")}
-          </Button>
-          <Button type="button" onClick={() => setConfirmApprove(true)}>
-            {busy ? t("panel.pleaseWait") : t("common.approve")}
-          </Button>
-        </div>
-      )}
-      {confirmApprove && onApprove && (
-        <ConfirmModal
-          title={t("admin.approveTitle")}
-          message={t("admin.approveLeave", {
-            name: request.name,
-            type: request.type,
-            dates: request.dates,
-          })}
-          confirmLabel={t("common.approve")}
-          cancelLabel={t("admin.goBack")}
-          danger={false}
-          close={() => setConfirmApprove(false)}
-          confirm={async () => {
-            await onApprove();
-            setConfirmApprove(false);
-          }}
-        />
-      )}
-      {confirmReject && onReject && (
-        <ConfirmModal
-          title={t("admin.rejectTitle")}
-          message={t("admin.rejectLeave", {
-            name: request.name,
-            type: request.type,
-            dates: request.dates,
-          })}
-          confirmLabel={t("common.reject")}
-          cancelLabel={t("admin.goBack")}
-          close={() => setConfirmReject(false)}
-          confirm={async () => {
-            await onReject();
-            setConfirmReject(false);
-          }}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -1416,119 +1529,122 @@ export function AuthorizationDetail({
   const t = useT();
   const { dateLocale } = useLanguage();
   return (
-    <div className="side-panel request-detail">
-      <button type="button" className="panel-close" onClick={close}>
-        <X size={18} />
-      </button>
-      <Avatar e={person} />
-      <h2>{request.name}</h2>
-      <p>
-        {displayValue(employee?.jobTitle)} · {request.department}
-      </p>
-      <Status status={request.status} />
-      <div className="request-solde is-two">
-        <div>
-          <span>{t("panel.duration")}</span>
-          <b>{request.durationLabel}</b>
+    <>
+      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
+      <div className="side-panel request-detail">
+        <button type="button" className="panel-close" onClick={close}>
+          <X size={18} />
+        </button>
+        <Avatar e={person} />
+        <h2>{request.name}</h2>
+        <p>
+          {displayValue(employee?.jobTitle)} · {request.department}
+        </p>
+        <Status status={request.status} />
+        <div className="request-solde is-two">
+          <div>
+            <span>{t("panel.duration")}</span>
+            <b>{request.durationLabel}</b>
+          </div>
+          <div>
+            <span>{t("employee.used")}</span>
+            <b>{formatDurationMinutes(usedMinutes)}</b>
+          </div>
         </div>
-        <div>
-          <span>{t("employee.used")}</span>
-          <b>{formatDurationMinutes(usedMinutes)}</b>
-        </div>
-      </div>
-      <div className="detail-block">
-        <p className="eyebrow">{t("panel.requestDetails")}</p>
-        <div className="detail-row">
-          <span>{t("panel.date")}</span>
-          <b>{formatDisplayDate(request.date, dateLocale)}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.startTime")}</span>
-          <b>{formatClock(request.startTime)}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.endTime")}</span>
-          <b>{formatClock(request.endTime)}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.duration")}</span>
-          <b>{request.durationLabel}</b>
-        </div>
-        <div className="detail-row">
-          <span>{t("panel.submitted")}</span>
-          <b>
-            {request.createdAt
-              ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : t("common.dash")}
-          </b>
-        </div>
-        {approverName && (
+        <div className="detail-block">
+          <p className="eyebrow">{t("panel.requestDetails")}</p>
           <div className="detail-row">
-            <span>{t("panel.reviewedBy")}</span>
-            <b>{approverName}</b>
+            <span>{t("panel.date")}</span>
+            <b>{formatDisplayDate(request.date, dateLocale)}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.startTime")}</span>
+            <b>{formatClock(request.startTime)}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.endTime")}</span>
+            <b>{formatClock(request.endTime)}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.duration")}</span>
+            <b>{request.durationLabel}</b>
+          </div>
+          <div className="detail-row">
+            <span>{t("panel.submitted")}</span>
+            <b>
+              {request.createdAt
+                ? new Date(request.createdAt).toLocaleDateString(dateLocale, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : t("common.dash")}
+            </b>
+          </div>
+          {approverName && (
+            <div className="detail-row">
+              <span>{t("panel.reviewedBy")}</span>
+              <b>{approverName}</b>
+            </div>
+          )}
+          {employee?.email && (
+            <div className="detail-row">
+              <span>{t("profile.workEmail")}</span>
+              <b>{employee.email}</b>
+            </div>
+          )}
+          <div className="detail-reason">
+            <span>{t("modal.reason")}</span>
+            <p>{displayValue(request.reason)}</p>
+          </div>
+        </div>
+        {request.status === "Pending" && onApprove && onReject && (
+          <div className="request-detail-actions">
+            <Button type="button" secondary onClick={() => setConfirmReject(true)}>
+              {busy ? t("panel.pleaseWait") : t("common.reject")}
+            </Button>
+            <Button type="button" onClick={() => setConfirmApprove(true)}>
+              {busy ? t("panel.pleaseWait") : t("common.approve")}
+            </Button>
           </div>
         )}
-        {employee?.email && (
-          <div className="detail-row">
-            <span>{t("profile.workEmail")}</span>
-            <b>{employee.email}</b>
-          </div>
+        {confirmApprove && onApprove && (
+          <ConfirmModal
+            title={t("admin.approveTitle")}
+            message={t("admin.approveAuthz", {
+              name: request.name,
+              date: formatDisplayDate(request.date, dateLocale),
+              duration: request.durationLabel,
+            })}
+            confirmLabel={t("common.approve")}
+            cancelLabel={t("admin.goBack")}
+            danger={false}
+            close={() => setConfirmApprove(false)}
+            confirm={async () => {
+              await onApprove();
+              setConfirmApprove(false);
+            }}
+          />
         )}
-        <div className="detail-reason">
-          <span>{t("modal.reason")}</span>
-          <p>{displayValue(request.reason)}</p>
-        </div>
+        {confirmReject && onReject && (
+          <ConfirmModal
+            title={t("admin.rejectTitle")}
+            message={t("admin.rejectAuthz", {
+              name: request.name,
+              date: formatDisplayDate(request.date, dateLocale),
+              duration: request.durationLabel,
+            })}
+            confirmLabel={t("common.reject")}
+            cancelLabel={t("admin.goBack")}
+            close={() => setConfirmReject(false)}
+            confirm={async () => {
+              await onReject();
+              setConfirmReject(false);
+            }}
+          />
+        )}
       </div>
-      {request.status === "Pending" && onApprove && onReject && (
-        <div className="request-detail-actions">
-          <Button type="button" secondary onClick={() => setConfirmReject(true)}>
-            {busy ? t("panel.pleaseWait") : t("common.reject")}
-          </Button>
-          <Button type="button" onClick={() => setConfirmApprove(true)}>
-            {busy ? t("panel.pleaseWait") : t("common.approve")}
-          </Button>
-        </div>
-      )}
-      {confirmApprove && onApprove && (
-        <ConfirmModal
-          title={t("admin.approveTitle")}
-          message={t("admin.approveAuthz", {
-            name: request.name,
-            date: formatDisplayDate(request.date, dateLocale),
-            duration: request.durationLabel,
-          })}
-          confirmLabel={t("common.approve")}
-          cancelLabel={t("admin.goBack")}
-          danger={false}
-          close={() => setConfirmApprove(false)}
-          confirm={async () => {
-            await onApprove();
-            setConfirmApprove(false);
-          }}
-        />
-      )}
-      {confirmReject && onReject && (
-        <ConfirmModal
-          title={t("admin.rejectTitle")}
-          message={t("admin.rejectAuthz", {
-            name: request.name,
-            date: formatDisplayDate(request.date, dateLocale),
-            duration: request.durationLabel,
-          })}
-          confirmLabel={t("common.reject")}
-          cancelLabel={t("admin.goBack")}
-          close={() => setConfirmReject(false)}
-          confirm={async () => {
-            await onReject();
-            setConfirmReject(false);
-          }}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -1563,7 +1679,13 @@ export function ConfirmModal({
   };
 
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Close when the press starts on the backdrop itself, not inside the dialog.
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <div className={`modal card confirm-modal${danger ? " is-danger" : ""}`}>
         <button type="button" className="panel-close" onClick={close}>
           <X size={18} />

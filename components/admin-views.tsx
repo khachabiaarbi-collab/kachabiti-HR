@@ -208,38 +208,6 @@ async function persistLeaveDecision(
   return error?.message ?? null;
 }
 
-async function deductAnnualLeaveDays(
-  supabase: ReturnType<typeof createClient>,
-  employeeId: string,
-  days: number,
-) {
-  if (days <= 0) return null;
-  const { data: types, error: typesError } = await supabase
-    .from("leave_types")
-    .select("id, name, code");
-  if (typesError) return typesError.message;
-  const annual = (types ?? []).find((type) => isAnnualLeaveType(type));
-  if (!annual) return "Vacation leave type not found";
-
-  const { data: annualBalance, error: annualLoadError } = await supabase
-    .from("leave_balances")
-    .select("days_remaining")
-    .eq("employee_id", employeeId)
-    .eq("leave_type_id", annual.id)
-    .maybeSingle();
-  if (annualLoadError) return annualLoadError.message;
-
-  const { error: annualError } = await supabase.from("leave_balances").upsert(
-    {
-      employee_id: employeeId,
-      leave_type_id: annual.id,
-      days_remaining: (Number(annualBalance?.days_remaining) || 0) - days,
-    },
-    { onConflict: "employee_id,leave_type_id" },
-  );
-  return annualError?.message ?? null;
-}
-
 async function persistAuthorizationDecision(
   requestId: string,
   status: "approved" | "rejected",
@@ -319,13 +287,13 @@ async function decideRequest(
   requestId: string,
   status: "approved" | "rejected",
   currentEmployee: Employee | null,
-  flash: (message: string) => void,
+  flash: (message: string, tone?: "success" | "error") => void,
   reload: () => Promise<void>,
   setBusyId: (id: string | null) => void,
   t: ReturnType<typeof useT>,
 ) {
   if (!currentEmployee) {
-    flash(t("profile.mustSignIn"));
+    flash(t("profile.mustSignIn"), "error");
     return;
   }
   setBusyId(requestId);
@@ -335,7 +303,7 @@ async function decideRequest(
     currentEmployee.id,
   );
   if (message) {
-    flash(message);
+    flash(message, "error");
     setBusyId(null);
     return;
   }
@@ -348,13 +316,13 @@ async function decideAuthorization(
   requestId: string,
   status: "approved" | "rejected",
   currentEmployee: Employee | null,
-  flash: (message: string) => void,
+  flash: (message: string, tone?: "success" | "error") => void,
   reload: () => Promise<void>,
   setBusyId: (id: string | null) => void,
   t: ReturnType<typeof useT>,
 ) {
   if (!currentEmployee) {
-    flash(t("profile.mustSignIn"));
+    flash(t("profile.mustSignIn"), "error");
     return;
   }
   setBusyId(requestId);
@@ -364,7 +332,7 @@ async function decideAuthorization(
     currentEmployee.id,
   );
   if (result.error) {
-    flash(result.error);
+    flash(result.error, "error");
     setBusyId(null);
     return;
   }
@@ -417,7 +385,7 @@ export function AdminView({
   setDepartments: (departments: Department[]) => void;
   setSelected: (employee: Employee | null) => void;
   navigate: (path: string) => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   setModal: (modal: ModalKind) => void;
   globalSearch: string;
   currentEmployee: Employee | null;
@@ -551,7 +519,7 @@ function Dashboard({
   requests: LeaveRequest[];
   currentEmployee: Employee | null;
   employees: Employee[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   reload: () => Promise<void>;
   onOpenAttendance: () => void;
 }) {
@@ -823,7 +791,7 @@ function People({
   departments: Department[];
   requests: LeaveRequest[];
   currentEmployee: Employee | null;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -974,7 +942,7 @@ function People({
           confirm={async () => {
             const message = await deleteEmployeeRecord(pendingDelete.id);
             if (message) {
-              flash(message);
+              flash(message, "error");
               return;
             }
             const nextEmployees = employees.filter(
@@ -1032,7 +1000,7 @@ function Requests({
   currentEmployee: Employee | null;
   balances: LeaveBalance[];
   leaveTypes: LeaveType[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   reload: () => Promise<void>;
   noticeFocus?: NoticeFocus | null;
   onNoticeFocusHandled?: () => void;
@@ -1600,7 +1568,7 @@ function Departments({
   employees: Employee[];
   setEmployees: (employees: Employee[]) => void;
   setModal: (modal: ModalKind) => void;
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
   reload: () => Promise<void>;
 }) {
   const t = useT();
@@ -1676,7 +1644,7 @@ function Departments({
           confirm={async () => {
             const message = await deleteDepartmentRecord(pendingDelete.id);
             if (message) {
-              flash(message);
+              flash(message, "error");
               return;
             }
             setEmployees(
@@ -2096,7 +2064,7 @@ function SettingsView({
   leaveTypes: LeaveType[];
   departments: Department[];
   employees: Employee[];
-  flash: (message: string) => void;
+  flash: (message: string, tone?: "success" | "error") => void;
 }) {
   const t = useT();
   const [tab, setTab] = useState("Company Profile");

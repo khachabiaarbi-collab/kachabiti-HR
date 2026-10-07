@@ -266,6 +266,10 @@ export function TopActions({
   requests = [],
   onOpenNotice,
   onOpenRequest,
+  unreadCount = null,
+  hasMoreNotices = false,
+  onLoadMoreNotices,
+  onNoticesChanged,
 }: {
   role: Role;
   logout: () => void;
@@ -281,13 +285,18 @@ export function TopActions({
   requests?: LeaveRequest[];
   onOpenNotice?: (notice: Notice) => void;
   onOpenRequest?: (request: LeaveRequest) => void;
+  /** Unread total from the database (beyond the loaded page). */
+  unreadCount?: number | null;
+  hasMoreNotices?: boolean;
+  onLoadMoreNotices?: () => Promise<void>;
+  onNoticesChanged?: () => void;
 }) {
   const { t, dateLocale } = useLanguage();
   const [showAccount, setShowAccount] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const unread = notices.filter((notice) => !notice.read).length;
+  const unread = unreadCount ?? notices.filter((notice) => !notice.read).length;
   const settingsLabel = role === "Employee" ? "My profile" : "Settings";
 
   useEffect(() => {
@@ -472,6 +481,9 @@ export function TopActions({
             notices={notices}
             setNotices={setNotices}
             onOpenNotice={onOpenNotice}
+            hasMore={hasMoreNotices}
+            onLoadMore={onLoadMoreNotices}
+            onChanged={onNoticesChanged}
           />
         )}
       </div>
@@ -542,13 +554,37 @@ function NotificationPanel({
   notices,
   setNotices,
   onOpenNotice,
+  hasMore = false,
+  onLoadMore,
+  onChanged,
 }: {
   notices: Notice[];
   setNotices: (notices: Notice[]) => void;
   onOpenNotice?: (notice: Notice) => void;
+  hasMore?: boolean;
+  onLoadMore?: () => Promise<void>;
+  onChanged?: () => void;
 }) {
   const { t, dateLocale } = useLanguage();
   const [justReadIds, setJustReadIds] = useState<string[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const loadMore = async () => {
+    if (!hasMore || !onLoadMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      await onLoadMore();
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Fetch the next page when the list is scrolled near its end.
+  const onScroll = () => {
+    const list = listRef.current;
+    if (list && list.scrollTop + list.clientHeight >= list.scrollHeight - 60) void loadMore();
+  };
   const icon = {
     approved: <Check />,
     rejected: <X />,
@@ -576,6 +612,20 @@ function NotificationPanel({
     );
     const supabase = createClient();
     await supabase.from("notifications").update({ read }).in("id", ids);
+    onChanged?.();
+  };
+
+  /** Also marks unread notices that are not loaded yet. */
+  const markAllRead = async () => {
+    setNotices(notices.map((notice) => ({ ...notice, read: true })));
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    }
+    onChanged?.();
   };
 
   const markAll = () => {
@@ -588,7 +638,7 @@ function NotificationPanel({
       return;
     }
     setJustReadIds(unreadIds);
-    void setRead(unreadIds, true);
+    void markAllRead();
   };
 
   const openItem = async (notice: Notice) => {
@@ -609,35 +659,42 @@ function NotificationPanel({
           </button>
         )}
       </div>
-      {notices.length === 0 ? (
-        <p className="notification-group">{t("notices.empty")}</p>
-      ) : (
-        groups.map((group) => (
-          <div key={group.label}>
-            <p className="notification-group">{group.label}</p>
-            {group.items.map((notice) => (
-              <button
-                type="button"
-                className={`notification-item ${notice.read ? "read" : ""}`}
-                key={notice.id}
-                onClick={() => openItem(notice)}
-              >
-                <span className={`notice-icon ${notice.kind}`}>
-                  {icon[notice.kind]}
-                </span>
-                <div>
-                  <p>{translateNotice(t, notice.text, notice.kind)}</p>
-                  <small>
-                    {notice.createdAt
-                      ? formatRelativeTime(t, notice.createdAt, dateLocale)
-                      : notice.time}
-                  </small>
-                </div>
-              </button>
-            ))}
-          </div>
-        ))
-      )}
+      <div className="notification-list" ref={listRef} onScroll={onScroll}>
+        {notices.length === 0 ? (
+          <p className="notification-group">{t("notices.empty")}</p>
+        ) : (
+          groups.map((group) => (
+            <div key={group.label}>
+              <p className="notification-group">{group.label}</p>
+              {group.items.map((notice) => (
+                <button
+                  type="button"
+                  className={`notification-item ${notice.read ? "read" : ""}`}
+                  key={notice.id}
+                  onClick={() => openItem(notice)}
+                >
+                  <span className={`notice-icon ${notice.kind}`}>
+                    {icon[notice.kind]}
+                  </span>
+                  <div>
+                    <p>{translateNotice(t, notice.text, notice.kind)}</p>
+                    <small>
+                      {notice.createdAt
+                        ? formatRelativeTime(t, notice.createdAt, dateLocale)
+                        : notice.time}
+                    </small>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ))
+        )}
+        {hasMore && (
+          <button type="button" className="notification-more" onClick={() => void loadMore()} disabled={loadingMore}>
+            {loadingMore ? t("notices.loading") : t("notices.loadMore")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

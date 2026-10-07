@@ -24,6 +24,8 @@ export type EmployeeContract = {
   dependentChildren: number;
   bankName: string | null;
   rib: string | null;
+  /** Absent days and missing hours from the time clock are deducted. */
+  attendanceBased: boolean;
 };
 
 export type EmployeeContractRow = {
@@ -42,10 +44,11 @@ export type EmployeeContractRow = {
   dependent_children: number;
   bank_name: string | null;
   rib: string | null;
+  attendance_based?: boolean | null;
 };
 
 export const CONTRACT_SELECT =
-  "id, employee_id, effective_from, contract_type, contract_end, pay_basis, base_salary, hourly_rate, weekly_hours, cnss_number, marital_status, head_of_family, dependent_children, bank_name, rib";
+  "id, employee_id, effective_from, contract_type, contract_end, pay_basis, base_salary, hourly_rate, weekly_hours, cnss_number, marital_status, head_of_family, dependent_children, bank_name, rib, attendance_based";
 
 function oneOf<T extends string>(values: readonly T[], value: string, fallback: T): T {
   return (values as readonly string[]).includes(value) ? (value as T) : fallback;
@@ -68,6 +71,7 @@ export function mapContract(row: EmployeeContractRow): EmployeeContract {
     dependentChildren: row.dependent_children,
     bankName: row.bank_name,
     rib: row.rib,
+    attendanceBased: row.attendance_based ?? true,
   };
 }
 
@@ -105,7 +109,7 @@ export function formatTnd(amount: number, locale: string) {
 export function isMissingPayrollTable(message: string | undefined) {
   return Boolean(
     message &&
-      /employee_contracts|payroll_/.test(message) &&
+      /employee_contracts|payroll_|attendance_based/.test(message) &&
       /does not exist|schema cache|Could not find/i.test(message),
   );
 }

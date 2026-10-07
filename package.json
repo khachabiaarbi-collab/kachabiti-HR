@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsc lib/payroll-calc.test.ts lib/payroll-export.test.ts --outDir .test-build --module commonjs --target es2022 --types node --skipLibCheck --esModuleInterop && node --test .test-build/"
+    "test": "tsc lib/payroll-calc.test.ts lib/payroll-export.test.ts lib/leave-accrual.test.ts --outDir .test-build --module commonjs --target es2022 --types node --skipLibCheck --esModuleInterop && node --test .test-build/"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

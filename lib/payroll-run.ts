@@ -11,8 +11,13 @@ import {
 } from "@/lib/payroll";
 import {
   calculatePayslip,
+  isExemptContract,
   round3,
+  summarizeAttendance,
+  summarizeClockMonth,
   workingDaysInRange,
+  type AttendanceDay,
+  type AttendanceSummary,
   type IrppBracket,
   type PayItem,
   type PayLine,
@@ -59,7 +64,8 @@ export type PayslipWarning =
   | "no_rib"
   | "hourly_no_hours"
   | "negative_net"
-  | "contract_ends";
+  | "contract_ends"
+  | "attendance_unavailable";
 
 export type PayslipInputs = {
   employee: {
@@ -79,6 +85,8 @@ export type PayslipInputs = {
   fixed: PayItem[];
   /** One-off bonuses or deductions for this month. */
   oneOff: PayItem[];
+  /** Time-clock reading of the month; null when pay does not follow attendance. */
+  attendance?: AttendanceSummary | null;
 };
 
 export type Payslip = {
@@ -169,6 +177,26 @@ export function mapPayslip(row: PayslipRow): Payslip {
 // ---------------------------------------------------------------------------
 // Months
 // ---------------------------------------------------------------------------
+
+/** Today's date in Tunisia, "YYYY-MM-DD". */
+/** Current time in Tunisia, "HH:MM". */
+export function nowInTunis() {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Tunis",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
+export function todayInTunis() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Tunis" }).format(new Date());
+}
+
+/** True while the month has not ended yet (it cannot be validated or issued). */
+export function isMonthInProgress(period: string) {
+  return todayInTunis() <= monthRange(period).to;
+}
 
 /** "2026-09" → { from: "2026-09-01", to: "2026-09-30", year: 2026 } */
 export function monthRange(period: string) {
@@ -468,13 +496,18 @@ export function effectiveVariables(inputs: PayslipInputs): PayVariables {
 function payslipWarnings(inputs: PayslipInputs, net: number, verified: boolean, to: string) {
   const warnings: PayslipWarning[] = [];
   if (!verified) warnings.push("rates_unverified");
-  if (!inputs.contract.cnssNumber) warnings.push("no_cnss_number");
+  if (!inputs.contract.cnssNumber && !isExemptContract(inputs.contract.contractType)) {
+    warnings.push("no_cnss_number");
+  }
   if (!inputs.contract.rib) warnings.push("no_rib");
   if (inputs.contract.payBasis === "hourly" && effectiveVariables(inputs).workedHours <= 0) {
     warnings.push("hourly_no_hours");
   }
   if (net < 0) warnings.push("negative_net");
   if (inputs.contract.contractEnd && inputs.contract.contractEnd <= to) warnings.push("contract_ends");
+  if (inputs.contract.attendanceBased && inputs.attendance === undefined) {
+    warnings.push("attendance_unavailable");
+  }
   return warnings;
 }
 
@@ -591,7 +624,7 @@ export async function prepareRun(
   }
   if (run.status !== "draft") return { run, missingContract: [] };
 
-  const [contractRows, components, employeeComponents, leaveRows, holidays, existing] =
+  const [contractRows, components, employeeComponents, leaveRows, holidays, existing, attendance, grace] =
     await Promise.all([
       supabase
         .from("employee_contracts")
@@ -607,6 +640,8 @@ export async function prepareRun(
         .gte("end_date", from),
       loadTunisiaHolidays(year),
       loadPayslips(run.id),
+      loadAttendanceMonth(from, to),
+      loadGraceMinutes(),
     ]);
   if (contractRows.error) throw new Error(contractRows.error.message);
   if (leaveRows.error) throw new Error(leaveRows.error.message);
@@ -623,14 +658,19 @@ export async function prepareRun(
     status: string;
     leave_types: { name: string; default_days: number } | { name: string; default_days: number }[] | null;
   };
-  const unpaidLeave = ((leaveRows.data ?? []) as LeaveRow[]).filter((row) => {
-    const type = Array.isArray(row.leave_types) ? row.leave_types[0] : row.leave_types;
-    return (
-      row.status.toLowerCase() === "approved" &&
-      type != null &&
-      isUnpaidLeaveType({ name: type.name, defaultDays: Number(type.default_days) || 0 })
-    );
-  });
+  const approvedLeave = ((leaveRows.data ?? []) as LeaveRow[])
+    .filter((row) => row.status.toLowerCase() === "approved")
+    .map((row) => {
+      const type = Array.isArray(row.leave_types) ? row.leave_types[0] : row.leave_types;
+      const unpaid =
+        type != null &&
+        isUnpaidLeaveType({ name: type.name, defaultDays: Number(type.default_days) || 0 });
+      return { ...row, unpaid };
+    });
+  const unpaidLeave = approvedLeave.filter((row) => row.unpaid);
+  // A month in progress is paid up to today; the rest of it is not paid yet.
+  const today = todayInTunis() <= to ? todayInTunis() : null;
+  const countedUntil = today ?? to;
 
   const missingContract: Employee[] = [];
   const included = new Set<string>();
@@ -645,7 +685,13 @@ export async function prepareRun(
     }
 
     const sixDayWeek = contract.weeklyHours > 40;
-    const startsAfter = employee.startDate && employee.startDate > from ? employee.startDate : null;
+    // Employment starts at the later of the hire date and the first contract version.
+    const firstVersion = contracts
+      .filter((item) => item.employeeId === employee.id)
+      .reduce((earliest, item) => (item.effectiveFrom < earliest ? item.effectiveFrom : earliest), contract.effectiveFrom);
+    const employedFrom =
+      employee.startDate && employee.startDate > firstVersion ? employee.startDate : firstVersion;
+    const startsAfter = employedFrom > from ? employedFrom : null;
     const endsBefore = contract.contractEnd && contract.contractEnd < to ? contract.contractEnd : null;
     const outsideContractDays =
       (startsAfter
@@ -661,8 +707,45 @@ export async function prepareRun(
           sum + workingDaysInRange(row.start_date, row.end_date, from, to, sixDayWeek, holidaySet),
         0,
       );
+
+    // Time clock: absent days, missing hours and (hourly pay) hours worked.
+    let summary: AttendanceSummary | null | undefined = null;
+    if (contract.attendanceBased || contract.payBasis === "hourly") {
+      if (attendance) {
+        const leave = new Map<string, boolean>();
+        for (const row of approvedLeave.filter((item) => item.employee_id === employee.id)) {
+          for (let date = row.start_date; date <= row.end_date; date = nextDay(date)) {
+            leave.set(date, row.unpaid || leave.get(date) === true);
+          }
+        }
+        summary = summarizeAttendance(attendance.get(employee.id) ?? [], {
+          countedUntil,
+          employedFrom,
+          employedTo: contract.contractEnd,
+          holidays: holidaySet,
+          leave,
+          graceMinutes: grace,
+          today,
+        });
+        // Quarter-hour rules (schedule windows, rounded punches, authorizations).
+        summary.clock = summarizeClockMonth(attendance.get(employee.id) ?? [], {
+          employedFrom,
+          employedTo: contract.contractEnd,
+          holidays: holidaySet,
+          leave,
+          today,
+          now: today ? nowInTunis() : null,
+        });
+      } else {
+        summary = undefined;
+      }
+    }
+    const useClock = Boolean(summary) && contract.attendanceBased;
+    const clock = useClock ? summary?.clock ?? null : null;
+    const clockPay = Boolean(clock && clock.scheduledHours > 0);
+    // Hourly pay counts the credited hours (quarter-hour rules) when available.
     const workedHours =
-      contract.payBasis === "hourly" ? await workedHoursInMonth(employee.id, from, to) : 0;
+      contract.payBasis === "hourly" ? summary?.clock?.creditedHours ?? summary?.workedHours ?? 0 : 0;
 
     const previous = existingByEmployee.get(employee.id);
     const inputs: PayslipInputs = {
@@ -675,7 +758,49 @@ export async function prepareRun(
       },
       contract,
       rates: ratesOnly(settings),
-      auto: { workedHours, unpaidDays, outsideContractDays, absenceHours: 0, overtimeHours: 0 },
+      auto:
+        clockPay && contract.payBasis === "monthly"
+          ? {
+              workedHours: 0,
+              unpaidDays: 0,
+              outsideContractDays: 0,
+              absentDays: 0,
+              earnedHours: null,
+              // Paid per hour: salary ÷ scheduled hours of the month.
+              scheduledHours: clock!.scheduledHours,
+              outsideHours: clock!.outsideHours,
+              unpaidHours: clock!.unpaidHours,
+              absenceHours: clock!.absenceHours,
+              notYetHours: clock!.notYetHours,
+              overtimeHours: clock!.overtimeHours,
+            }
+          : {
+              workedHours,
+              // With the time clock, days follow the employee's own schedule.
+              unpaidDays: useClock ? summary!.unpaidDays : unpaidDays,
+              outsideContractDays: useClock ? summary!.outsideContractDays : outsideContractDays,
+              absentDays: useClock ? summary!.absentDays : 0,
+              absenceHours: useClock ? summary!.missingHours : 0,
+              // Month in progress: pay only the hours earned up to today.
+              earnedHours:
+                !today || contract.payBasis !== "monthly"
+                  ? null
+                  : useClock
+                    ? summary!.earnedHours
+                    : round3(
+                        workingDaysInRange(
+                          employedFrom > from ? employedFrom : from,
+                          today,
+                          from,
+                          to,
+                          sixDayWeek,
+                          holidaySet,
+                        ) *
+                          (contract.weeklyHours / (sixDayWeek ? 6 : 5)),
+                      ),
+              overtimeHours: contract.payBasis === "hourly" && useClock ? summary?.clock?.overtimeHours ?? 0 : 0,
+            },
+      attendance: summary,
       manual: previous?.inputs.manual ?? {},
       fixed: employeeComponents
         .filter((item) => item.employeeId === employee.id)
@@ -714,19 +839,46 @@ function previousDay(iso: string) {
   return date.toISOString().slice(0, 10);
 }
 
-async function workedHoursInMonth(employeeId: string, from: string, to: string) {
-  const { data, error } = await createClient().rpc("attendance_report", {
+/** Scheduled / worked / authorized minutes per employee and day; null if attendance is not set up. */
+async function loadAttendanceMonth(from: string, to: string) {
+  const { data, error } = await createClient().rpc("payroll_attendance_month", {
     p_from: from,
     p_to: to,
-    p_employee_id: employeeId,
-    p_department_id: null,
-    p_status: null,
-    p_limit: 100,
-    p_offset: 0,
   });
-  if (error) return 0;
-  const items = ((data as { items?: { workedMinutes?: number }[] } | null)?.items ?? []);
-  return round3(items.reduce((sum, item) => sum + (Number(item.workedMinutes) || 0), 0) / 60);
+  if (error) return null;
+  const byEmployee = new Map<string, AttendanceDay[]>();
+  for (const row of (data ?? []) as {
+    employee_id: string;
+    work_date: string;
+    scheduled_minutes: number;
+    worked_minutes: number;
+    authorized_minutes: number;
+    segments?: { start: string; end: string }[] | null;
+    sessions?: { in: string; out: string | null }[] | null;
+    authorizations?: { start: string; end: string }[] | null;
+  }[]) {
+    const days = byEmployee.get(row.employee_id) ?? [];
+    days.push({
+      date: row.work_date,
+      scheduledMinutes: Number(row.scheduled_minutes) || 0,
+      workedMinutes: Number(row.worked_minutes) || 0,
+      authorizedMinutes: Number(row.authorized_minutes) || 0,
+      // Older payroll.sql (before the quarter-hour rules) returns no windows.
+      segments: row.segments ?? undefined,
+      sessions: row.sessions ?? undefined,
+      authorizations: row.authorizations ?? undefined,
+    });
+    byEmployee.set(row.employee_id, days);
+  }
+  return byEmployee;
+}
+
+async function loadGraceMinutes() {
+  const { data } = await createClient()
+    .from("attendance_settings")
+    .select("grace_minutes")
+    .maybeSingle();
+  return Number((data as { grace_minutes?: number } | null)?.grace_minutes) || 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -781,4 +933,34 @@ export async function loadPublishedPayslips(from: string, to: string) {
     .lte("period", to);
   if (error) throw new Error(error.message);
   return ((data ?? []) as PayslipRow[]).map(mapPayslip);
+}
+
+export type ContractPeriod = { employeeId: string; effectiveFrom: string; contractEnd: string | null };
+
+/** Every contract version's dates, to explain why someone has no payslip. */
+export async function loadContractPeriods(): Promise<ContractPeriod[]> {
+  const { data, error } = await createClient()
+    .from("employee_contracts")
+    .select("employee_id, effective_from, contract_end");
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as { employee_id: string; effective_from: string; contract_end: string | null }[]).map(
+    (row) => ({ employeeId: row.employee_id, effectiveFrom: row.effective_from, contractEnd: row.contract_end }),
+  );
+}
+
+export type ExclusionReason =
+  | { kind: "no_contract" }
+  | { kind: "starts_later"; date: string }
+  | { kind: "ended"; date: string };
+
+/** Why an active employee has no payslip for the month [from, to]. */
+export function exclusionReason(periods: ContractPeriod[], employeeId: string, from: string, to: string): ExclusionReason {
+  const mine = periods
+    .filter((period) => period.employeeId === employeeId)
+    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom));
+  if (!mine.length) return { kind: "no_contract" };
+  const inForce = mine.find((period) => period.effectiveFrom <= to);
+  if (!inForce) return { kind: "starts_later", date: mine[mine.length - 1].effectiveFrom };
+  if (inForce.contractEnd && inForce.contractEnd < from) return { kind: "ended", date: inForce.contractEnd };
+  return { kind: "no_contract" };
 }
