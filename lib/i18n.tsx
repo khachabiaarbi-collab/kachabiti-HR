@@ -119,6 +119,30 @@ export function translateRole(t: Translate, role: string) {
   return role;
 }
 
+/**
+ * Leave type names come from the catalogue (often in Arabic or English).
+ * Show the known ones with the same words everywhere: "Congé annuel" /
+ * "Annual leave" for vacation, and so on. Unknown types keep their name.
+ */
+export function leaveTypeLabel(t: Translate, name: string) {
+  const value = name.trim();
+  const rules: [RegExp, MessageKey][] = [
+    [/annual|vacation|annuel|vacances|سنوي/i, "leaveType.annual"],
+    [/sick|maladie|مرض/i, "leaveType.sick"],
+    [/parental|maternit|paternit|أبوة|أمومة/i, "leaveType.parental"],
+    [/unpaid|sans solde|بدون أجر|غير مدفوع/i, "leaveType.unpaid"],
+    [/وفاة الزوج|death of spouse|décès du conjoint/i, "leaveType.deathSpouse"],
+    [/وفاة أحد الوالدين|death of a parent|décès d.un parent/i, "leaveType.deathParent"],
+    [/وفاة أخ|death of a sibling|décès d.un frère/i, "leaveType.deathOther"],
+    [/زواج ابن|marriage of a child|mariage d.un enfant/i, "leaveType.marriageChild"],
+    [/زواج الموظ|employee.s marriage|mariage de l.employé/i, "leaveType.marriage"],
+    [/ختان|circumcision|circoncision/i, "leaveType.circumcision"],
+  ];
+  const match = rules.find(([pattern]) => pattern.test(value));
+  if (match) return t(match[1]);
+  return /leave|congé|إجازة/i.test(value) ? value : `${value} leave`;
+}
+
 export function screenLabel(t: Translate, label: string) {
   const labels: Record<string, MessageKey> = {
     Overview: "nav.overview",
