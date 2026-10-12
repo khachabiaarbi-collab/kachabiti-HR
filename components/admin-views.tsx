@@ -45,6 +45,7 @@ import {
   pageForId,
 } from "@/components/primitives";
 import { PayrollView } from "@/components/payroll-views";
+import type { MessageKey } from "@/lib/messages";
 import {
   AuthorizationDetail,
   ConfirmModal,
@@ -941,7 +942,7 @@ function People({
           confirm={async () => {
             const message = await deleteEmployeeRecord(pendingDelete.id);
             if (message) {
-              flash(message, "error");
+              flash(deleteEmployeeErrorText(t, message, pendingDelete.name), "error");
               return;
             }
             const nextEmployees = employees.filter(
@@ -2157,4 +2158,28 @@ function SettingsView({
       </div>
     </>
   );
+}
+
+/** Readable text for deleteEmployeeRecord's error codes. */
+function deleteEmployeeErrorText(t: ReturnType<typeof useT>, code: string, name: string) {
+  if (code === "delete.notAllowed") return t("delete.notAllowed");
+  if (code === "delete.self") return t("delete.self");
+  if (code === "delete.noServiceKey") return t("delete.noServiceKey");
+  if (code === "delete.hasPayslips") return t("delete.hasPayslips", { name });
+  if (code.startsWith("delete.linked:")) {
+    const table = code.slice("delete.linked:".length);
+    const known: Record<string, MessageKey> = {
+      payslips: "delete.table.payslips",
+      leave_requests: "delete.table.leave_requests",
+      leave_balances: "delete.table.leave_balances",
+      events: "delete.table.events",
+      departments: "delete.table.departments",
+      authorizations: "delete.table.authorizations",
+      attendance_punches: "delete.table.attendance_punches",
+      employee_contracts: "delete.table.employee_contracts",
+    };
+    const what = known[table] ? t(known[table]) : table;
+    return t("delete.linked", { name, what });
+  }
+  return code;
 }
