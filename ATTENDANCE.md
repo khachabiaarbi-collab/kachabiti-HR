@@ -11,6 +11,8 @@ Run the SQL scripts in the Supabase SQL editor in this order:
    tables.
 2. [`supabase/authorizations.sql`](supabase/authorizations.sql).
 3. [`supabase/attendance.sql`](supabase/attendance.sql).
+   After a schedule/break-rule change, also re-run [`supabase/payroll.sql`](supabase/payroll.sql)
+   and [`supabase/leave_accrual.sql`](supabase/leave_accrual.sql).
 
 `attendance.sql` is idempotent and creates the attendance tables, default work
 schedule, row-level security policies, indexes, validation triggers, summary
@@ -151,17 +153,27 @@ Payroll reads attendance through `payroll_attendance_month()` (in
 `supabase/payroll.sql`) and counts time with these rules
 (`creditDay` / `summarizeClockMonth` in `lib/payroll-calc.ts`):
 
-- Time counts in quarter hours and only inside the scheduled work segments.
+- Work segments define the day window (first start → last end). A Pause
+  segment sets the sliding break **duration** (30 min, 1 h, …), not a fixed
+  slot. Paid length = window minus that duration. With no Pause row, the
+  hole between work blocks is used (0 for a single block: Saturday / part-time).
+- Time counts in quarter hours inside that day window.
 - An entry moves up to the next quarter: 07:55 counts from 08:00, 08:01 or
   08:10 from 08:15. There is no tolerance.
 - An exit moves down to the previous quarter (16:50 → 16:45) and never counts
-  past the end of the schedule (17:05 or 17:30 → 17:00).
-- The same applies after the break (back at 13:05 → counts from 13:15).
+  past the end of the day window (17:05 or 17:30 → 17:00).
+- Break is sliding: a gap between punch sessions is the pause. Up to the
+  allowance is unpaid and does not count as “late”. Longer gaps simply leave
+  less presence (already unpaid). Returning from pause is not a late mark.
+- No midday exit on a full continuous day (e.g. 08:00–17:00 or 08:00–18:00):
+  the full break allowance is deducted automatically; overtime after the day
+  end still requires a complete paid day and at least one extra hour.
+- Late / early are judged only against the day start and day end.
 - Approved authorizations count as worked time; arriving after the end of the
   authorization follows the same quarter rule.
-- Overtime is time after the end of the schedule, counted only when the full
-  day was earned and the extra reaches one hour (left at 18:00 after a full
-  day → 1 h). It is paid at the overtime rate.
+- Overtime is time after the day end, counted only when the full paid day was
+  earned and the extra reaches one hour (left at 18:00 after a full day →
+  1 h). It is paid at the overtime rate.
 - Public holidays and approved paid leave are paid; unpaid leave is not.
 
 Monthly salaries are paid per hour: salary × credited hours ÷ scheduled hours

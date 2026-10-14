@@ -11,8 +11,11 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ClipboardPaste,
   Clock3,
+  Copy,
   Filter,
+  GripVertical,
   History,
   LoaderCircle,
   PencilLine,
@@ -30,7 +33,15 @@ import {
 
 import { Header, Metric } from "@/components/primitives";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
-import { creditDay, type DayCredit } from "@/lib/payroll-calc";
+import { creditDay, explicitBreakMinutes, type DayCredit } from "@/lib/payroll-calc";
+import {
+  cloneSegment,
+  insertAfter,
+  moveSegment,
+  parseCopiedSegment,
+  withSegmentPositions,
+  type CopiedSegment,
+} from "@/lib/schedule-segments";
 import {
   formatLeaveDayCount,
   type LeaveHourTeamItem,
@@ -122,6 +133,13 @@ const tunisClock = new Intl.DateTimeFormat("en-GB", {
  * Time that counts for pay and vacation (quarter-hour rules, inside the
  * schedule, authorizations included); the raw punched time is workedMinutes.
  */
+function breakMinutesFromSchedule(segments: { kind: string; startTime: string; endTime: string }[]) {
+  const breaks = segments
+    .filter((segment) => segment.kind === "break")
+    .map((segment) => ({ start: segment.startTime.slice(0, 5), end: segment.endTime.slice(0, 5) }));
+  return breaks.length ? explicitBreakMinutes(breaks) : null;
+}
+
 function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
   const segments = item.scheduleSegments
     .filter((segment) => segment.kind === "work")
@@ -137,7 +155,7 @@ function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
     end: authorization.endTime.slice(0, 5),
   }));
   const now = item.workDate === today ? tunisClock.format(new Date()) : null;
-  return creditDay(segments, sessions, authorizations, now);
+  return creditDay(segments, sessions, authorizations, now, breakMinutesFromSchedule(item.scheduleSegments));
 }
 
 function datetimeLocalValue(value: string) {
@@ -1641,8 +1659,10 @@ export function AttendanceScheduleSettings({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [copiedSegment, setCopiedSegment] = useState<CopiedSegment | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferId?: string) => {
     setLoading(true);
     setError("");
     try {
@@ -1657,8 +1677,9 @@ export function AttendanceScheduleSettings({
       };
       setSchedules(result.schedules);
       setSettings(result.settings);
+      const wanted = preferId || selectedId;
       const selected =
-        result.schedules.find((schedule) => schedule.id === selectedId) ??
+        result.schedules.find((schedule) => schedule.id === wanted) ??
         result.schedules.find((schedule) => schedule.isDefault) ??
         result.schedules[0] ??
         null;
@@ -1683,6 +1704,70 @@ export function AttendanceScheduleSettings({
     setDraft(selected ? structuredClone(selected) : null);
   };
 
+  const startNewSchedule = () => {
+    setSelectedId("");
+    setDraft({
+      id: "",
+      name: t("att.newScheduleName"),
+      isDefault: false,
+      isActive: true,
+      segments: [1, 2, 3, 4, 5].map((isoWeekday, index) => ({
+        isoWeekday,
+        kind: "work" as const,
+        startTime: "08:00",
+        endTime: "13:00",
+        position: index + 1,
+      })),
+      assignments: [],
+    });
+  };
+
+  const reorderSegments = (from: number, to: number) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      segments: withSegmentPositions(moveSegment(draft.segments, from, to)),
+    });
+  };
+
+  const toCopied = (segment: ScheduleSegment): CopiedSegment =>
+    cloneSegment({
+      isoWeekday: segment.isoWeekday ?? 1,
+      kind: segment.kind,
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+    });
+
+  const copySegment = async (segment: ScheduleSegment) => {
+    const copied = toCopied(segment);
+    setCopiedSegment(copied);
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(copied));
+    } catch {
+      // In-memory copy still works if the browser blocks the clipboard.
+    }
+  };
+
+  const pasteSegment = async (afterIndex: number, weekday?: number) => {
+    if (!draft) return;
+    let copied = copiedSegment;
+    try {
+      copied = parseCopiedSegment(await navigator.clipboard.readText()) ?? copied;
+    } catch {
+      // Fall back to the last copied row in this screen.
+    }
+    if (!copied) return;
+    const next = {
+      ...cloneSegment(copied),
+      isoWeekday: weekday ?? copied.isoWeekday,
+      position: 0,
+    };
+    setDraft({
+      ...draft,
+      segments: withSegmentPositions(insertAfter(draft.segments, afterIndex, next)),
+    });
+  };
+
   const updateSegment = (
     index: number,
     field: keyof ScheduleSegment,
@@ -1705,7 +1790,10 @@ export function AttendanceScheduleSettings({
       const response = await fetch("/api/work-schedules", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedule: draft, settings }),
+        body: JSON.stringify({
+          schedule: { ...draft, id: draft.id || undefined },
+          settings,
+        }),
       });
       const payload: unknown = await response.json();
       if (!response.ok) {
@@ -1713,7 +1801,7 @@ export function AttendanceScheduleSettings({
         return;
       }
       flash(t("att.scheduleSaved"));
-      await load();
+      await load((payload as { id?: string }).id);
     } catch {
       setError(t("att.network"));
     } finally {
@@ -1754,6 +1842,9 @@ export function AttendanceScheduleSettings({
             onChange={(event) => setDraft({ ...draft, name: event.target.value })}
           />
         </label>
+        <button type="button" className="secondary-button" onClick={startNewSchedule}>
+          <Plus size={14} /> {t("att.newSchedule")}
+        </button>
       </div>
 
       <div className="attendance-settings-grid">
@@ -1791,6 +1882,7 @@ export function AttendanceScheduleSettings({
         <div>
           <p className="eyebrow">{t("att.weekly")}</p>
           <h3>{t("att.weeklyTitle")}</h3>
+          <p className="page-subtitle">{t("att.breakHint")}</p>
         </div>
         <button
           type="button"
@@ -1813,10 +1905,45 @@ export function AttendanceScheduleSettings({
         >
           <Plus size={14} /> {t("att.addSegment")}
         </button>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!copiedSegment}
+          onClick={() => void pasteSegment(draft.segments.length - 1)}
+        >
+          <ClipboardPaste size={14} /> {t("att.pasteSegment")}
+        </button>
       </div>
       <div className="schedule-segment-list">
         {draft.segments.map((segment, index) => (
-          <div className="schedule-segment-row" key={segment.id ?? index}>
+          <div
+            className={`schedule-segment-row${dragIndex === index ? " is-dragging" : ""}`}
+            key={segment.id ?? `new-${index}`}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const from = Number(event.dataTransfer.getData("text/plain"));
+              setDragIndex(null);
+              if (Number.isInteger(from)) reorderSegments(from, index);
+            }}
+          >
+            <button
+              type="button"
+              className="schedule-segment-handle"
+              aria-label={t("att.reorderSegment")}
+              draggable
+              onDragStart={(event) => {
+                setDragIndex(index);
+                event.dataTransfer.setData("text/plain", String(index));
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragEnd={() => setDragIndex(null)}
+            >
+              <GripVertical size={15} />
+            </button>
             <select
               value={segment.isoWeekday}
               onChange={(event) =>
@@ -1847,18 +1974,35 @@ export function AttendanceScheduleSettings({
               value={segment.endTime.slice(0, 5)}
               onChange={(event) => updateSegment(index, "endTime", event.target.value)}
             />
-            <button
-              type="button"
-              aria-label={t("att.removeSegment")}
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  segments: draft.segments.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              <Trash2 size={15} />
-            </button>
+            <div className="schedule-segment-actions">
+              <button
+                type="button"
+                aria-label={t("att.copySegment")}
+                onClick={() => void copySegment(segment)}
+              >
+                <Copy size={15} />
+              </button>
+              <button
+                type="button"
+                aria-label={t("att.pasteSegment")}
+                disabled={!copiedSegment}
+                onClick={() => void pasteSegment(index, segment.isoWeekday)}
+              >
+                <ClipboardPaste size={15} />
+              </button>
+              <button
+                type="button"
+                aria-label={t("att.removeSegment")}
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    segments: draft.segments.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -1894,6 +2038,7 @@ function ScheduleAssignments({
         <div>
           <p className="eyebrow">{t("att.overrides")}</p>
           <h3>{t("att.assignments")}</h3>
+          <p className="page-subtitle">{t("att.mixedHint")}</p>
         </div>
         <button
           type="button"

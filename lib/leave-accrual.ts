@@ -1,10 +1,10 @@
-// Vacation earned from the time clock, with the same quarter-hour rules as
-// payroll (creditDay). Pure, so it runs under `npm test`.
+// Vacation earned from the time clock, with the same quarter-hour and sliding
+// break rules as payroll (creditDay). Pure, so it runs under `npm test`.
 //
 // For each month since the hire date:
 //   earned days = credited hours ÷ scheduled hours of the month × the month's rate
-// - credited hours: punched time inside the schedule, entries moved up and exits
-//   moved down to the quarter; overtime earns nothing;
+// - credited hours: punched time inside the day window, entries moved up and exits
+//   moved down to the quarter; sliding break; overtime earns nothing;
 // - public holidays and approved paid leave are left out of both sides, so they
 //   neither earn nor cost vacation;
 // - approved authorization time that was not worked is deducted from the
@@ -18,6 +18,7 @@ export type CreditWindowDay = {
   segments: TimeWindow[];
   sessions: PunchSession[];
   authorizations: TimeWindow[];
+  breakMinutes?: number | null;
 };
 
 export type RateChange = { effectiveMonth: string; monthlyDays: number };
@@ -83,8 +84,14 @@ export function accrueLeave(
     const employed = !options.employedFrom || day.date >= options.employedFrom;
     if (!employed || day.date > options.today) continue;
     const now = day.date === options.today ? options.now : null;
-    const worked = creditDay(day.segments, day.sessions, [], now).creditedMinutes;
-    const withAuthorizations = creditDay(day.segments, day.sessions, day.authorizations, now).creditedMinutes;
+    const worked = creditDay(day.segments, day.sessions, [], now, day.breakMinutes).creditedMinutes;
+    const withAuthorizations = creditDay(
+      day.segments,
+      day.sessions,
+      day.authorizations,
+      now,
+      day.breakMinutes,
+    ).creditedMinutes;
     totals.credited += Math.min(day.scheduledMinutes, worked);
     totals.uncovered += Math.max(0, withAuthorizations - worked);
   }

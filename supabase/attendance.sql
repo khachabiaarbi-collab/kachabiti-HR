@@ -395,6 +395,56 @@ as $$
   );
 $$;
 
+create or replace function public.attendance_day_paid_minutes(
+  p_schedule_id uuid,
+  p_iso_weekday integer
+)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with work as (
+    select
+      coalesce(extract(epoch from (max(segment.end_time) - min(segment.start_time))) / 60, 0) as span,
+      coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0) as blocks
+    from public.work_schedule_segments segment
+    where segment.schedule_id = p_schedule_id
+      and segment.iso_weekday = p_iso_weekday
+      and segment.kind = 'work'
+  ),
+  pause as (
+    select coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0) as mins
+    from public.work_schedule_segments segment
+    where segment.schedule_id = p_schedule_id
+      and segment.iso_weekday = p_iso_weekday
+      and segment.kind = 'break'
+  )
+  select case
+    when pause.mins > 0 then greatest(0, work.span - pause.mins)::integer
+    else work.blocks::integer
+  end
+  from work, pause;
+$$;
+
+create or replace function public.attendance_day_break_minutes(
+  p_schedule_id uuid,
+  p_iso_weekday integer
+)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0)::integer
+  from public.work_schedule_segments segment
+  where segment.schedule_id = p_schedule_id
+    and segment.iso_weekday = p_iso_weekday
+    and segment.kind = 'break';
+$$;
+
 create or replace function public.attendance_day_summary(
   p_employee_id uuid,
   p_work_date date,
@@ -1142,12 +1192,16 @@ for select to authenticated using (public.attendance_is_staff());
 
 revoke all on function public.attendance_is_staff(uuid) from public;
 revoke all on function public.attendance_resolved_schedule(uuid, date) from public;
+revoke all on function public.attendance_day_paid_minutes(uuid, integer) from public;
+revoke all on function public.attendance_day_break_minutes(uuid, integer) from public;
 revoke all on function public.attendance_day_summary(uuid, date, timestamptz) from public;
 revoke all on function public.punch_attendance(uuid, uuid) from public;
 revoke all on function public.attendance_today() from public;
 revoke all on function public.apply_attendance_correction(uuid, text, text) from public;
 revoke all on function public.attendance_report(date, date, uuid, uuid, text, integer, integer) from public;
 revoke all on function public.save_work_schedule(jsonb, jsonb, jsonb, jsonb) from public;
+grant execute on function public.attendance_day_paid_minutes(uuid, integer) to authenticated;
+grant execute on function public.attendance_day_break_minutes(uuid, integer) to authenticated;
 grant execute on function public.attendance_day_summary(uuid, date, timestamptz) to authenticated;
 grant execute on function public.attendance_is_staff(uuid) to authenticated;
 grant execute on function public.punch_attendance(uuid, uuid) to authenticated;

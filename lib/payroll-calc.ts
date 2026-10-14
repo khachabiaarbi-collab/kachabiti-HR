@@ -533,6 +533,8 @@ export type AttendanceDay = {
   segments?: { start: string; end: string }[];
   sessions?: { in: string; out: string | null }[];
   authorizations?: { start: string; end: string }[];
+  /** Sliding break allowance; omit to infer the hole between work blocks. */
+  breakMinutes?: number | null;
 };
 
 export type AttendanceSummary = {
@@ -574,7 +576,7 @@ export type ClockMonth = {
   absentDays: number;
 };
 
-/** Reads a month with the quarter-hour rules (see creditDay). */
+/** Reads a month with the quarter-hour and sliding-break rules (see creditDay). */
 export function summarizeClockMonth(
   days: AttendanceDay[],
   options: {
@@ -619,7 +621,13 @@ export function summarizeClockMonth(
     }
     const isToday = today !== null && day.date === today;
     const credit = day.segments
-      ? creditDay(day.segments, day.sessions ?? [], day.authorizations ?? [], isToday ? options.now ?? null : null)
+      ? creditDay(
+          day.segments,
+          day.sessions ?? [],
+          day.authorizations ?? [],
+          isToday ? options.now ?? null : null,
+          day.breakMinutes,
+        )
       : {
           creditedMinutes: Math.min(scheduled, Math.max(0, day.workedMinutes) + Math.max(0, day.authorizedMinutes)),
           overtimeMinutes: 0,
@@ -749,17 +757,22 @@ export function summarizeAttendance(
 }
 
 // ---------------------------------------------------------------------------
-// Quarter-hour discipline rules (time clock → credited time)
+// Quarter-hour discipline + sliding break (time clock → credited time)
 // ---------------------------------------------------------------------------
 //
-// Time counts in quarter hours and only inside the schedule:
-// - an entry is moved up to the next quarter (07:55 → 08:00 at the schedule
-//   start, 08:01 or 08:10 → 08:15); there is no tolerance;
-// - an exit is moved down to the previous quarter (08:50 → 08:45) and never
-//   counts past the end of the schedule (17:05 or 17:30 → 17:00);
-// - approved authorizations count as worked time;
-// - overtime is the time after the end of the schedule, counted only when the
-//   full scheduled day was earned and the extra reaches one hour.
+// Work segments define the day window (first start → last end). An explicit
+// breakMinutes (from Pause rows) is the sliding allowance; otherwise the hole
+// between work blocks is used (0 for a single block). Paid length = window
+// minus that allowance.
+//
+// - Entry moves up to the next quarter; exit moves down; nothing after day end.
+// - Break may fall anywhere: gaps between punch sessions count as pause.
+// - Pause ≤ allowance: no penalty. A single session with no pause punch that
+//   already exceeds the paid day has the full allowance deducted automatically.
+// - Late / early are judged only against the day start and day end (not the
+//   return from pause).
+// - Overtime is time after day end, only when the paid day is complete and the
+//   extra reaches one hour.
 
 export type TimeWindow = { start: string; end: string };
 export type PunchSession = { in: string; out: string | null };
@@ -767,9 +780,9 @@ export type PunchSession = { in: string; out: string | null };
 export type DayCredit = {
   creditedMinutes: number;
   overtimeMinutes: number;
-  /** Arrived after the start of a scheduled segment (morning or after the break). */
+  /** First credited presence starts after the day start. */
   lateCount: number;
-  /** Left before the end of a scheduled segment. */
+  /** Last credited presence ends before the day end. */
   earlyLeaveCount: number;
 };
 
@@ -802,6 +815,87 @@ function overlap(intervals: [number, number][], [from, to]: [number, number]) {
   );
 }
 
+/** Unpaid break minutes implied by work segments (span of day minus paid work). */
+export function breakAllowanceMinutes(segments: [number, number][]) {
+  if (!segments.length) return 0;
+  const dayStart = segments[0][0];
+  const dayEnd = segments[segments.length - 1][1];
+  const scheduled = segments.reduce((total, [a, b]) => total + (b - a), 0);
+  return Math.max(0, dayEnd - dayStart - scheduled);
+}
+
+/** Sum of break windows; only the duration matters, not the clock slot. */
+export function explicitBreakMinutes(windows: TimeWindow[]) {
+  return windows.reduce((total, { start, end }) => {
+    const minutes = clockMinutes(end) - clockMinutes(start);
+    return total + (minutes > 0 ? minutes : 0);
+  }, 0);
+}
+
+/** Paid length of the day: first work start → last work end, minus the break. */
+export function paidDayMinutes(segments: [number, number][], breakMinutes: number) {
+  if (!segments.length) return 0;
+  return Math.max(0, segments[segments.length - 1][1] - segments[0][0] - Math.max(0, breakMinutes));
+}
+
+export function resolveBreakAllowance(
+  segments: [number, number][],
+  breakMinutes?: number | null,
+) {
+  if (breakMinutes != null) return Math.max(0, breakMinutes);
+  return breakAllowanceMinutes(segments);
+}
+
+/**
+ * Pause punches: sum of holes between consecutive intervals inside [from, to].
+ * Leading lateness and trailing early leave are not a break.
+ */
+export function gapMinutesBetween(
+  intervals: [number, number][],
+  from: number,
+  to: number,
+) {
+  if (to <= from) return 0;
+  const inside = mergeIntervals(
+    intervals.map(([a, b]): [number, number] => [Math.max(a, from), Math.min(b, to)]),
+  );
+  let gaps = 0;
+  for (let index = 1; index < inside.length; index += 1) {
+    gaps += Math.max(0, inside[index][0] - inside[index - 1][1]);
+  }
+  return gaps;
+}
+
+/**
+ * Auto break deduction when there was no pause punch. Gaps between sessions
+ * are already outside presence, so they must not be deducted again. A short
+ * continuous day (still open / half day) does not force the deduction yet.
+ */
+export function breakDeductionMinutes(
+  breakAllowance: number,
+  punchGapMinutes: number,
+  presenceMinutes: number,
+  scheduledMinutes: number,
+) {
+  if (breakAllowance <= 0) return 0;
+  if (punchGapMinutes > 0) return 0;
+  if (presenceMinutes <= scheduledMinutes) return 0;
+  return breakAllowance;
+}
+
+function roundedSessions(
+  sessions: PunchSession[],
+  now: string | null,
+): [number, number][] {
+  return mergeIntervals(
+    sessions.flatMap(({ in: entry, out }): [number, number][] => {
+      const exit = out ?? now;
+      if (!exit) return [];
+      return [[ceilQuarter(clockMinutes(entry)), floorQuarter(clockMinutes(exit))]];
+    }),
+  );
+}
+
 /**
  * Credited time of one day. `now` ("HH:MM") closes a session still open today;
  * open sessions on other days are ignored (incomplete day).
@@ -811,37 +905,46 @@ export function creditDay(
   sessions: PunchSession[],
   authorizations: TimeWindow[] = [],
   now: string | null = null,
+  breakMinutes?: number | null,
 ): DayCredit {
   const schedule = segments
     .map(({ start, end }): [number, number] => [clockMinutes(start), clockMinutes(end)])
     .filter(([a, b]) => b > a)
     .sort((x, y) => x[0] - y[0]);
-  const worked = mergeIntervals(
-    sessions.flatMap(({ in: entry, out }): [number, number][] => {
-      const exit = out ?? now;
-      if (!exit) return [];
-      return [[ceilQuarter(clockMinutes(entry)), floorQuarter(clockMinutes(exit))]];
-    }),
-  );
-  const covered = mergeIntervals([
-    ...worked,
-    ...authorizations.map(({ start, end }): [number, number] => [clockMinutes(start), clockMinutes(end)]),
-  ]);
-
-  const scheduled = schedule.reduce((total, [a, b]) => total + (b - a), 0);
-  const creditedMinutes = schedule.reduce((total, window) => total + overlap(covered, window), 0);
-
-  let lateCount = 0;
-  let earlyLeaveCount = 0;
-  for (const [a, b] of schedule) {
-    const inside = covered.filter(([x, y]) => y > a && x < b);
-    if (!inside.length) continue;
-    if (inside[0][0] > a) lateCount += 1;
-    if (inside[inside.length - 1][1] < b) earlyLeaveCount += 1;
+  if (!schedule.length) {
+    return { creditedMinutes: 0, overtimeMinutes: 0, lateCount: 0, earlyLeaveCount: 0 };
   }
 
-  const dayEnd = schedule.length ? schedule[schedule.length - 1][1] : 0;
-  const extra = schedule.length ? overlap(worked, [dayEnd, 24 * 60]) : 0;
+  const dayStart = schedule[0][0];
+  const dayEnd = schedule[schedule.length - 1][1];
+  const breakAllowance = resolveBreakAllowance(schedule, breakMinutes);
+  const scheduled = paidDayMinutes(schedule, breakAllowance);
+
+  const worked = roundedSessions(sessions, now);
+  const covered = mergeIntervals([
+    ...worked,
+    ...authorizations.map(({ start, end }): [number, number] => [
+      clockMinutes(start),
+      clockMinutes(end),
+    ]),
+  ]);
+
+  const presence = overlap(covered, [dayStart, dayEnd]);
+  const punchGaps = gapMinutesBetween(worked, dayStart, dayEnd);
+  const deducted = breakDeductionMinutes(breakAllowance, punchGaps, presence, scheduled);
+  const creditedMinutes = Math.max(0, presence - deducted);
+
+  const inside = mergeIntervals(
+    covered.map(([a, b]): [number, number] => [Math.max(a, dayStart), Math.min(b, dayEnd)]),
+  );
+  let lateCount = 0;
+  let earlyLeaveCount = 0;
+  if (inside.length) {
+    if (inside[0][0] > dayStart) lateCount = 1;
+    if (inside[inside.length - 1][1] < dayEnd) earlyLeaveCount = 1;
+  }
+
+  const extra = overlap(worked, [dayEnd, 24 * 60]);
   const overtimeMinutes =
     scheduled > 0 && creditedMinutes >= scheduled && extra >= OVERTIME_MINIMUM ? extra : 0;
 

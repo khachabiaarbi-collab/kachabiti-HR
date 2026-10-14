@@ -365,13 +365,44 @@ test("discipline: a full day with one session over the break counts 8 h, nothing
   assert.equal(day.lateCount, 0);
 });
 
-test("discipline: back from lunch at 13:05 counts from 13:15", () => {
+test("discipline: continuous 08:00–18:00 deducts 1 h break and pays 1 h overtime", () => {
+  const day = creditDay(weekday, [{ in: "08:00", out: "18:00" }]);
+  assert.equal(day.creditedMinutes, 480);
+  assert.equal(day.overtimeMinutes, 60);
+  assert.equal(day.lateCount, 0);
+  assert.equal(day.earlyLeaveCount, 0);
+});
+
+test("discipline: sliding break — back at 13:05 is not late; quarter rounds entry", () => {
   const day = creditDay(weekday, [
     { in: "08:00", out: "12:00" },
     { in: "13:05", out: "17:05" },
   ]);
+  // Gap 75 min → presence 7h45; excess over 1 h already outside presence.
   assert.equal(day.creditedMinutes, 465);
-  assert.equal(day.lateCount, 1);
+  assert.equal(day.lateCount, 0);
+  assert.equal(day.earlyLeaveCount, 0);
+});
+
+test("discipline: sliding break Takwa 07:55–12:45 then 13:39–17:00 counts 8 h, not late", () => {
+  const day = creditDay(weekday, [
+    { in: "07:55", out: "12:45" },
+    { in: "13:39", out: "17:00" },
+  ]);
+  assert.equal(day.creditedMinutes, 480);
+  assert.equal(day.lateCount, 0);
+  assert.equal(day.earlyLeaveCount, 0);
+});
+
+test("discipline: pause longer than 1 h shortens credited time", () => {
+  const day = creditDay(weekday, [
+    { in: "08:00", out: "12:00" },
+    { in: "14:00", out: "17:00" },
+  ]);
+  // Gap 2 h → presence 7 h (excess 1 h already unpaid).
+  assert.equal(day.creditedMinutes, 420);
+  assert.equal(day.lateCount, 0);
+  assert.equal(day.earlyLeaveCount, 0);
 });
 
 test("discipline: overtime when the 8 h are done and he leaves at 18:00", () => {
@@ -390,6 +421,7 @@ test("discipline: no overtime when the day was not complete", () => {
   ]);
   assert.equal(day.creditedMinutes, 450);
   assert.equal(day.overtimeMinutes, 0);
+  assert.equal(day.lateCount, 1);
 });
 
 test("discipline: authorization 08:00–09:00 and arrival at 09:00 loses nothing", () => {
@@ -406,6 +438,26 @@ test("discipline: authorization until 09:00 and arrival at 09:10 counts from 09:
   );
 });
 
+test("discipline: part-time 5 h with no break has no auto pause deduction", () => {
+  const partTime = [{ start: "08:00", end: "13:00" }];
+  const day = creditDay(partTime, [{ in: "08:00", out: "13:00" }]);
+  assert.equal(day.creditedMinutes, 300);
+  assert.equal(day.overtimeMinutes, 0);
+});
+
+test("discipline: 30 min sliding break on 08:00–17:00", () => {
+  const day = creditDay([{ start: "08:00", end: "17:00" }], [{ in: "08:00", out: "17:00" }], [], null, 30);
+  assert.equal(day.creditedMinutes, 510);
+  assert.equal(day.overtimeMinutes, 0);
+});
+
+test("discipline: 12:00–20:30 with 1 h sliding break and overtime after 20:30", () => {
+  const late = [{ start: "12:00", end: "20:30" }];
+  const day = creditDay(late, [{ in: "12:00", out: "21:30" }], [], null, 60);
+  assert.equal(day.creditedMinutes, 450);
+  assert.equal(day.overtimeMinutes, 60);
+});
+
 test("discipline: Saturday 08:00–13:30", () => {
   const saturday = [{ start: "08:00", end: "13:30" }];
   assert.equal(creditDay(saturday, [{ in: "07:58", out: "13:40" }]).creditedMinutes, 330);
@@ -417,7 +469,62 @@ test("discipline: a session still open today closes at now; other days it is ign
   assert.equal(creditDay(weekday, [{ in: "08:00", out: null }]).creditedMinutes, 0);
 });
 
-import { summarizeClockMonth } from "./payroll-calc";
+import {
+  breakAllowanceMinutes,
+  breakDeductionMinutes,
+  explicitBreakMinutes,
+  gapMinutesBetween,
+  paidDayMinutes,
+  resolveBreakAllowance,
+  summarizeClockMonth,
+} from "./payroll-calc";
+
+test("explicitBreakMinutes: duration only", () => {
+  assert.equal(explicitBreakMinutes([{ start: "12:00", end: "12:30" }]), 30);
+  assert.equal(explicitBreakMinutes([{ start: "16:00", end: "17:00" }]), 60);
+});
+
+test("paidDayMinutes and resolveBreakAllowance", () => {
+  const late = [
+    [12 * 60, 20 * 60 + 30],
+  ] as [number, number][];
+  assert.equal(paidDayMinutes(late, 60), 450);
+  assert.equal(resolveBreakAllowance(late, 30), 30);
+  assert.equal(resolveBreakAllowance(late, null), 0);
+});
+
+test("breakAllowanceMinutes: weekday hole is 1 h, single block is 0", () => {
+  assert.equal(
+    breakAllowanceMinutes([
+      [8 * 60, 12 * 60],
+      [13 * 60, 17 * 60],
+    ]),
+    60,
+  );
+  assert.equal(breakAllowanceMinutes([[8 * 60, 13 * 60]]), 0);
+});
+
+test("gapMinutesBetween: only holes between sessions", () => {
+  assert.equal(
+    gapMinutesBetween(
+      [
+        [8 * 60, 12 * 60 + 45],
+        [13 * 60 + 45, 17 * 60],
+      ],
+      8 * 60,
+      17 * 60,
+    ),
+    60,
+  );
+  assert.equal(gapMinutesBetween([[8 * 60, 12 * 60]], 8 * 60, 17 * 60), 0);
+});
+
+test("breakDeductionMinutes: force allowance only on a continuous over-long day", () => {
+  assert.equal(breakDeductionMinutes(60, 0, 540, 480), 60);
+  assert.equal(breakDeductionMinutes(60, 0, 240, 480), 0);
+  assert.equal(breakDeductionMinutes(60, 54, 480, 480), 0);
+  assert.equal(breakDeductionMinutes(0, 0, 300, 300), 0);
+});
 
 const weekdaySegments = [
   { start: "08:00", end: "12:00" },

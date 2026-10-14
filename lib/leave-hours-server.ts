@@ -364,6 +364,7 @@ type WindowRow = {
   segments: CreditWindowDay["segments"] | null;
   sessions: CreditWindowDay["sessions"] | null;
   authorizations: CreditWindowDay["authorizations"] | null;
+  break_minutes?: number | null;
 };
 
 /** null when leave_accrual.sql is not installed yet. */
@@ -385,6 +386,7 @@ async function loadWindows(auth: AttendanceAuth, employeeId: string | null, from
         segments: row.segments ?? [],
         sessions: row.sessions ?? [],
         authorizations: row.authorizations ?? [],
+        breakMinutes: row.break_minutes ?? null,
       });
       byEmployee.set(row.employee_id, days);
     }
