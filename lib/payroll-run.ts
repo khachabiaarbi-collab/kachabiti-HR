@@ -856,6 +856,7 @@ async function loadAttendanceMonth(from: string, to: string) {
     segments?: { start: string; end: string }[] | null;
     sessions?: { in: string; out: string | null }[] | null;
     authorizations?: { start: string; end: string }[] | null;
+    break_minutes?: number | null;
   }[]) {
     const days = byEmployee.get(row.employee_id) ?? [];
     days.push({
@@ -867,6 +868,7 @@ async function loadAttendanceMonth(from: string, to: string) {
       segments: row.segments ?? undefined,
       sessions: row.sessions ?? undefined,
       authorizations: row.authorizations ?? undefined,
+      breakMinutes: row.break_minutes ?? null,
     });
     byEmployee.set(row.employee_id, days);
   }

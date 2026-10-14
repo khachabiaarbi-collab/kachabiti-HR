@@ -463,7 +463,8 @@ returns table (
   -- Tunis local times "HH24:MI", for the quarter-hour discipline rules.
   segments jsonb,
   sessions jsonb,
-  authorizations jsonb
+  authorizations jsonb,
+  break_minutes integer
 )
 language plpgsql
 stable
@@ -492,13 +493,19 @@ begin
       employee_id := person.id;
       work_date := day;
 
-      select
-        coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0)::integer,
-        coalesce(jsonb_agg(jsonb_build_object(
-          'start', to_char(segment.start_time, 'HH24:MI'),
-          'end', to_char(segment.end_time, 'HH24:MI')
-        ) order by segment.start_time), '[]'::jsonb)
-      into scheduled_minutes, segments
+      scheduled_minutes := public.attendance_day_paid_minutes(
+        schedule_value,
+        extract(isodow from day)::integer
+      );
+      break_minutes := public.attendance_day_break_minutes(
+        schedule_value,
+        extract(isodow from day)::integer
+      );
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'start', to_char(segment.start_time, 'HH24:MI'),
+        'end', to_char(segment.end_time, 'HH24:MI')
+      ) order by segment.start_time), '[]'::jsonb)
+      into segments
       from public.work_schedule_segments segment
       where segment.schedule_id = schedule_value
         and segment.kind = 'work'
