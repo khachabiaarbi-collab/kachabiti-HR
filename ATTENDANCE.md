@@ -157,11 +157,13 @@ Payroll reads attendance through `payroll_attendance_month()` (in
   segment sets the sliding break **duration** (30 min, 1 h, …), not a fixed
   slot. Paid length = window minus that duration. With no Pause row, the
   hole between work blocks is used (0 for a single block: Saturday / part-time).
-- Time counts in quarter hours inside that day window.
-- An entry moves up to the next quarter: 07:55 counts from 08:00, 08:01 or
+- Quarter-hour rounding applies only to the first entry and last exit of the
+  day, against that person’s window (08:00–17:00 or 12:00–20:30). Mid-day
+  punches stay at the clock time.
+- First entry moves up to the next quarter: 07:55 counts from 08:00, 08:01 or
   08:10 from 08:15. There is no tolerance.
-- An exit moves down to the previous quarter (16:50 → 16:45) and never counts
-  past the end of the day window (17:05 or 17:30 → 17:00).
+- Last exit moves down to the previous quarter (16:50 → 16:45) and never
+  counts past the end of the day window (17:05 or 17:30 → 17:00).
 - Break is sliding: a gap between punch sessions is the pause. Up to the
   allowance is unpaid and does not count as “late”. Longer gaps simply leave
   less presence (already unpaid). Returning from pause is not a late mark.

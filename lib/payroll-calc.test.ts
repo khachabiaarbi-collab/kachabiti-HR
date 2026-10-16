@@ -373,25 +373,47 @@ test("discipline: continuous 08:00–18:00 deducts 1 h break and pays 1 h overti
   assert.equal(day.earlyLeaveCount, 0);
 });
 
-test("discipline: sliding break — back at 13:05 is not late; quarter rounds entry", () => {
+test("discipline: sliding break — mid-day 13:05 is not rounded; last exit is", () => {
   const day = creditDay(weekday, [
     { in: "08:00", out: "12:00" },
     { in: "13:05", out: "17:05" },
   ]);
-  // Gap 75 min → presence 7h45; excess over 1 h already outside presence.
-  assert.equal(day.creditedMinutes, 465);
+  // 08:00–12:00 + 13:05–17:00 = 7 h 55.
+  assert.equal(day.creditedMinutes, 475);
   assert.equal(day.lateCount, 0);
   assert.equal(day.earlyLeaveCount, 0);
 });
 
-test("discipline: sliding break Takwa 07:55–12:45 then 13:39–17:00 counts 8 h, not late", () => {
+test("discipline: sliding break Takwa 07:55–12:45 then 13:39–17:00 is not late", () => {
   const day = creditDay(weekday, [
     { in: "07:55", out: "12:45" },
     { in: "13:39", out: "17:00" },
   ]);
-  assert.equal(day.creditedMinutes, 480);
+  // First entry 08:00; 13:39 stays; 08:00–12:45 + 13:39–17:00 = 8 h 6.
+  assert.equal(day.creditedMinutes, 486);
   assert.equal(day.lateCount, 0);
   assert.equal(day.earlyLeaveCount, 0);
+});
+
+test("discipline: mid-day exit 12:58 is not rounded down to 12:45", () => {
+  const evening = [
+    { start: "12:00", end: "16:00" },
+    { start: "16:30", end: "20:30" },
+  ];
+  const day = creditDay(
+    evening,
+    [
+      { in: "12:02", out: "12:58" },
+      { in: "13:35", out: "15:12" },
+      { in: "15:57", out: "20:32" },
+    ],
+    [],
+    null,
+    30,
+  );
+  // First 12:15, last 20:30; middle punches stay exact → 6 h 53.
+  assert.equal(day.creditedMinutes, 413);
+  assert.equal(day.lateCount, 1);
 });
 
 test("discipline: pause longer than 1 h shortens credited time", () => {
@@ -476,8 +498,24 @@ import {
   gapMinutesBetween,
   paidDayMinutes,
   resolveBreakAllowance,
+  roundFirstEntryLastExit,
   summarizeClockMonth,
 } from "./payroll-calc";
+
+test("roundFirstEntryLastExit: only first start and last end", () => {
+  assert.deepEqual(
+    roundFirstEntryLastExit([
+      [12 * 60 + 2, 12 * 60 + 58],
+      [13 * 60 + 35, 15 * 60 + 12],
+      [15 * 60 + 57, 20 * 60 + 32],
+    ]),
+    [
+      [12 * 60 + 15, 12 * 60 + 58],
+      [13 * 60 + 35, 15 * 60 + 12],
+      [15 * 60 + 57, 20 * 60 + 30],
+    ],
+  );
+});
 
 test("explicitBreakMinutes: duration only", () => {
   assert.equal(explicitBreakMinutes([{ start: "12:00", end: "12:30" }]), 30);

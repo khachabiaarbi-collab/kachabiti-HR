@@ -765,7 +765,9 @@ export function summarizeAttendance(
 // between work blocks is used (0 for a single block). Paid length = window
 // minus that allowance.
 //
-// - Entry moves up to the next quarter; exit moves down; nothing after day end.
+// - Only the first entry of the day moves up to the next quarter, and only the
+//   last exit moves down (vs that person's day start/end: 08:00–17:00 or
+//   12:00–20:30). Mid-day punches stay at the clock time.
 // - Break may fall anywhere: gaps between punch sessions count as pause.
 // - Pause ≤ allowance: no penalty. A single session with no pause punch that
 //   already exceeds the paid day has the full allowance deducted automatically.
@@ -883,15 +885,25 @@ export function breakDeductionMinutes(
   return breakAllowance;
 }
 
+/** Quarter-hour only on the day's first entry and last exit. */
+export function roundFirstEntryLastExit(intervals: [number, number][]) {
+  const merged = mergeIntervals(intervals);
+  if (!merged.length) return [];
+  const next = merged.map(([start, end]): [number, number] => [start, end]);
+  next[0][0] = ceilQuarter(next[0][0]);
+  next[next.length - 1][1] = floorQuarter(next[next.length - 1][1]);
+  return mergeIntervals(next);
+}
+
 function roundedSessions(
   sessions: PunchSession[],
   now: string | null,
 ): [number, number][] {
-  return mergeIntervals(
+  return roundFirstEntryLastExit(
     sessions.flatMap(({ in: entry, out }): [number, number][] => {
       const exit = out ?? now;
       if (!exit) return [];
-      return [[ceilQuarter(clockMinutes(entry)), floorQuarter(clockMinutes(exit))]];
+      return [[clockMinutes(entry), clockMinutes(exit)]];
     }),
   );
 }
