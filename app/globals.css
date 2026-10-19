@@ -4210,7 +4210,11 @@ button.attendance-report-row:hover {
 .payroll-row > :first-child {
   text-align: left;
 }
-.payroll-row.is-clickable:hover {
+.payroll-row.is-clickable {
+  cursor: pointer;
+}
+.payroll-row.is-clickable:hover,
+.payroll-row.is-clickable.is-selected {
   background: #fafaf8;
 }
 .payroll-open {

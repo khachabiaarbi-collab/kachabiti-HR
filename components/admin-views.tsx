@@ -863,7 +863,19 @@ function People({
             (balance) => isAnnualLeaveType({ name: balance.typeName }),
           );
           return (
-            <div className="employee-row people-row" key={employee.id}>
+            <div
+              className="employee-row people-row is-selectable"
+              key={employee.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelected(employee)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSelected(employee);
+                }
+              }}
+            >
               <div className="table-member">
                 <Avatar e={employee} />
                 <div>
@@ -912,11 +924,23 @@ function People({
                 )}
               </div>
               <div className="row-actions">
-              <button type="button" onClick={() => setSelected(employee)}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelected(employee);
+                }}
+              >
                 <Pencil size={14} />
               </button>
               {currentEmployee?.id !== employee.id && (
-                <button type="button" onClick={() => setPendingDelete(employee)}>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPendingDelete(employee);
+                  }}
+                >
                   <Trash2 size={14} />
                 </button>
               )}
