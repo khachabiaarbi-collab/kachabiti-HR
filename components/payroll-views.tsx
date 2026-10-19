@@ -962,12 +962,20 @@ export function PayrollView({
                 {sorted.map((payslip) => {
                   const employee = byEmployee.get(payslip.employeeId);
                   return (
-                    <div className="payroll-row is-clickable" key={payslip.id}>
-                      <button
-                        type="button"
-                        className="table-member payroll-open"
-                        onClick={() => setOpenPayslip(payslip)}
-                      >
+                    <div
+                      className={`payroll-row is-clickable${openPayslip?.id === payslip.id ? " is-selected" : ""}`}
+                      key={payslip.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setOpenPayslip(payslip)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setOpenPayslip(payslip);
+                        }
+                      }}
+                    >
+                      <div className="table-member payroll-open">
                         {employee && <Avatar e={employee} />}
                         <span>
                           <b>{payslip.inputs.employee.name}</b>
@@ -985,7 +993,7 @@ export function PayrollView({
                             )}
                           </span>
                         </span>
-                      </button>
+                      </div>
                       <span>{money(payslip.gross)}</span>
                       <span>{money(payslip.cnssEmployee)}</span>
                       <span>{money(payslip.irpp + payslip.css)}</span>
@@ -996,7 +1004,10 @@ export function PayrollView({
                         className="icon-button payroll-row-print"
                         aria-label={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
                         title={t("payslip.exportOne", { name: payslip.inputs.employee.name })}
-                        onClick={() => setPrinting([payslip])}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPrinting([payslip]);
+                        }}
                         disabled={inProgress}
                       >
                         <Download size={15} />
