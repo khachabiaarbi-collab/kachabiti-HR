@@ -774,6 +774,226 @@ export function AttendanceOverviewCard({
   );
 }
 
+type DayFilter = "all" | "absent" | "late" | "incomplete";
+
+/** One employee's month in the employee panel: totals, then each day. */
+export function EmployeeAttendance({ employeeId }: { employeeId: string }) {
+  const { t, dateLocale } = useLanguage();
+  const [month, setMonth] = useState(() => localIsoDate().slice(0, 7));
+  const [items, setItems] = useState<AttendanceReportItem[] | null>(null);
+  const [hours, setHours] = useState<LeaveHourTeamItem | null>(null);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState<DayFilter>("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    setHours(null);
+    setFilter("all");
+    setError("");
+    const today = localIsoDate();
+    const [year, monthNumber] = month.split("-").map(Number);
+    const from = `${month}-01`;
+    const last = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+    const to = last < today ? last : today;
+    if (from > today) {
+      setItems([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ from, to, employeeId, page: "1", pageSize: "100" });
+        const [records, monthly] = await Promise.all([
+          fetch(`/api/attendance?${params}`, { cache: "no-store" }),
+          fetch(`/api/attendance/leave-hours?month=${month}`, { cache: "no-store" }),
+        ]);
+        const payload: unknown = await records.json();
+        if (!records.ok) throw new Error(apiMessage(payload, t("att.recordsFailed")));
+        const monthPayload = monthly.ok
+          ? ((await monthly.json()) as { items?: LeaveHourTeamItem[] })
+          : {};
+        if (cancelled) return;
+        setItems(
+          [...((payload as { items?: AttendanceReportItem[] }).items ?? [])].sort((a, b) =>
+            b.workDate.localeCompare(a.workDate),
+          ),
+        );
+        setHours(monthPayload.items?.find((row) => row.employeeId === employeeId) ?? null);
+      } catch (loadError) {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : t("att.recordsFailed"));
+        setItems([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId, month, t]);
+
+  const days = items ?? [];
+  const today = localIsoDate();
+  const isAbsent = (item: AttendanceReportItem) => item.state === "absent" && item.isWorkingDay;
+  const isLate = (item: AttendanceReportItem) => (creditedForDay(item)?.lateCount ?? 0) > 0;
+  const matches: Record<DayFilter, (item: AttendanceReportItem) => boolean> = {
+    all: () => true,
+    absent: isAbsent,
+    late: isLate,
+    incomplete: (item) => item.state === "incomplete",
+  };
+  const absentDays = days.filter(isAbsent).length;
+  const lateDays = days.filter(isLate).length;
+  const filters: { id: DayFilter; label: string; count: number }[] = [
+    { id: "all", label: t("common.all"), count: days.length },
+    { id: "absent", label: t("drawer.absences"), count: absentDays },
+    { id: "late", label: t("drawer.lateDays"), count: lateDays },
+    { id: "incomplete", label: t("att.incomplete"), count: days.filter(matches.incomplete).length },
+  ];
+  const shown = days.filter(matches[filter]);
+  const dayLabel = (iso: string) =>
+    new Intl.DateTimeFormat(dateLocale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(new Date(`${iso}T00:00:00Z`));
+  const dash = t("common.dash");
+
+  return (
+    <div className="detail-block employee-attendance">
+      <p className="eyebrow">{t("drawer.tabAttendance")}</p>
+      <div className="employee-attendance-bar">
+        <MonthSwitcher value={month} label={t("att.month")} onChange={setMonth} />
+        <span className="field-hint">{t("drawer.attendanceNote")}</span>
+      </div>
+      <dl className="employee-attendance-stats">
+        <div>
+          <dt>{t("att.scheduled")}</dt>
+          <dd>{hours ? `${hours.scheduledHours} h` : dash}</dd>
+        </div>
+        <div>
+          <dt>{t("att.punched")}</dt>
+          <dd>
+            {hours ? `${hours.punchedHours} h` : dash}
+            {hours && hours.scheduledHours > 0 && (
+              <small>{rendementPercent(hours.scheduledHours, hours.punchedHours)} %</small>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("att.extra")}</dt>
+          <dd>{hours ? `${hours.extraHours} h` : dash}</dd>
+        </div>
+        <div className={absentDays > 0 ? "is-warning" : undefined}>
+          <dt>{t("drawer.absences")}</dt>
+          <dd>
+            <button
+              type="button"
+              className="stat-link"
+              disabled={!absentDays}
+              aria-pressed={filter === "absent"}
+              onClick={() => setFilter(filter === "absent" ? "all" : "absent")}
+            >
+              {items ? `${absentDays} ${t("panel.daysShort")}` : dash}
+            </button>
+          </dd>
+        </div>
+        <div className={lateDays > 0 ? "is-warning" : undefined}>
+          <dt>{t("drawer.lateDays")}</dt>
+          <dd>
+            <button
+              type="button"
+              className="stat-link"
+              disabled={!lateDays}
+              aria-pressed={filter === "late"}
+              onClick={() => setFilter(filter === "late" ? "all" : "late")}
+            >
+              {items ? lateDays : dash}
+            </button>
+          </dd>
+        </div>
+      </dl>
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+      {items === null ? (
+        <p className="field-hint">{t("drawer.attendanceLoading")}</p>
+      ) : days.length === 0 ? (
+        !error && <p className="field-hint">{t("drawer.attendanceEmpty")}</p>
+      ) : (
+        <>
+          <div className="day-filters" role="group" aria-label={t("drawer.dayFilters")}>
+            {filters.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={filter === option.id ? "is-active" : undefined}
+                aria-pressed={filter === option.id}
+                disabled={option.id !== "all" && option.count === 0}
+                onClick={() => setFilter(option.id)}
+              >
+                {option.label}
+                <span>{option.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="day-table" role="table" aria-label={t("drawer.tabAttendance")}>
+            <div className="day-row is-head" role="row">
+              <span role="columnheader">{t("att.colDate")}</span>
+              <span role="columnheader">{t("filter.status")}</span>
+              <span role="columnheader" className="is-num">{t("att.entry")}</span>
+              <span role="columnheader" className="is-num">{t("att.exit")}</span>
+              <span role="columnheader" className="is-num day-col-worked">{t("att.colWorked")}</span>
+              <span role="columnheader" className="is-num" title={t("att.creditedHint")}>
+                {t("att.colCredited")}
+              </span>
+            </div>
+            {shown.length === 0 ? (
+              <p className="day-table-empty">{t("drawer.noDayMatch")}</p>
+            ) : (
+              shown.map((item) => {
+                const off = item.state === "absent" && !item.isWorkingDay;
+                return (
+                  <div
+                    key={item.workDate}
+                    role="row"
+                    className={`day-row${item.workDate === today ? " is-today" : ""}${off ? " is-off" : ""}${isAbsent(item) ? " is-absent" : ""}`}
+                  >
+                    <span role="cell" className="day-date">
+                      {dayLabel(item.workDate)}
+                      {item.workDate === today && <small>{t("drawer.today")}</small>}
+                    </span>
+                    <span role="cell">
+                      <em className={`attendance-state is-${off ? "off" : item.state}`}>
+                        {off ? t("drawer.dayOff") : statusCopy(t, item.state)}
+                      </em>
+                    </span>
+                    <span role="cell" className="is-num">{formatTime(item.firstEntryAt)}</span>
+                    <span role="cell" className="is-num">
+                      {item.state === "present" && !item.lastExitAt ? (
+                        <span className="day-open">{t("drawer.inProgress")}</span>
+                      ) : (
+                        formatTime(item.lastExitAt)
+                      )}
+                    </span>
+                    <span role="cell" className="is-num day-col-worked">
+                      {item.workedMinutes > 0 ? formatAttendanceDuration(item.workedMinutes) : dash}
+                    </span>
+                    <span role="cell" className="is-num">
+                      <CreditedCell item={item} />
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function AdminAttendance({
   employees,
   departments,

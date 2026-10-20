@@ -467,6 +467,24 @@ export async function loadMyPayslips(employeeId: string) {
   return ((data ?? []) as PayslipRow[]).map(mapPayslip);
 }
 
+/** Admin: every payslip of one employee with its month's status, newest first. */
+export async function loadEmployeePayslips(employeeId: string) {
+  const payslips = await loadMyPayslips(employeeId);
+  if (!payslips.length) return [];
+  const { data, error } = await createClient()
+    .from("payroll_runs")
+    .select("id, status")
+    .in("id", [...new Set(payslips.map((payslip) => payslip.runId))]);
+  if (error) throw new Error(error.message);
+  const statuses = new Map(
+    ((data ?? []) as { id: string; status: RunStatus }[]).map((row) => [row.id, row.status]),
+  );
+  return payslips.map((payslip) => ({
+    payslip,
+    status: statuses.get(payslip.runId) ?? ("draft" as RunStatus),
+  }));
+}
+
 export async function loadPayslip(id: string) {
   const { data, error } = await createClient()
     .from("payslips")

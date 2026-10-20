@@ -60,6 +60,7 @@ import {
   loadComponents,
   loadContractPeriods,
   loadEmployeeComponents,
+  loadEmployeePayslips,
   loadMyPayslips,
   loadPublishedPayslips,
   loadPayslips,
@@ -84,6 +85,7 @@ import {
   type PayslipWarning,
   type PayrollRun,
   type PayrollSettings,
+  type RunStatus,
 } from "@/lib/payroll-run";
 import {
   annualTaxCsv,
@@ -2138,6 +2140,93 @@ export function MyPayslips({
       )}
       {open && <PayslipDocument payslips={[open]} onClose={() => setOpen(null)} />}
     </section>
+  );
+}
+
+/** Admin view of one employee's payslips, used in the employee panel. */
+export function EmployeePayslips({
+  employeeId,
+  flash: rawFlash,
+}: {
+  employeeId: string;
+  flash: (message: string, tone?: "success" | "error") => void;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  const [rows, setRows] = useState<{ payslip: Payslip; status: RunStatus }[] | null>(null);
+  const [open, setOpen] = useState<Payslip | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    loadEmployeePayslips(employeeId)
+      .then((items) => {
+        if (!cancelled) setRows(items);
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        if (!isMissingPayrollTable(error.message)) flash(error.message, "error");
+        setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId, flash]);
+
+  return (
+    <div className="detail-block employee-payslips">
+      <p className="eyebrow">{t("drawer.tabPayslips")}</p>
+      <p className="page-subtitle">{t("payslip.employeeNote")}</p>
+      {rows === null ? (
+        <p className="field-hint">{t("payslip.loading")}</p>
+      ) : rows.length === 0 ? (
+        <p className="field-hint">{t("payslip.employeeEmpty")}</p>
+      ) : (
+        <ul className="employee-payslip-list">
+          {rows.map(({ payslip, status }) => {
+            const inProgress = isMonthInProgress(payslip.period);
+            return (
+              <li key={payslip.id} className="employee-payslip">
+                <div className="employee-payslip-month">
+                  <b>{monthLabel(payslip.period, dateLocale)}</b>
+                  <span
+                    className={`status-pill ${status === "draft" ? "status-pending" : "status-approved"}`}
+                  >
+                    <span className="status-dot" />
+                    {status === "paid"
+                      ? t("payroll.status.paid")
+                      : status === "validated"
+                        ? t("payroll.status.validated")
+                        : t("payroll.status.draft")}
+                  </span>
+                </div>
+                <dl className="employee-payslip-figures">
+                  <div>
+                    <dt>{t("payroll.gross")}</dt>
+                    <dd>{formatTnd(payslip.gross, dateLocale)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("payroll.net")}</dt>
+                    <dd className="is-net">{formatTnd(payslip.net, dateLocale)}</dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setOpen(payslip)}
+                  disabled={inProgress}
+                  title={inProgress ? t("payslip.notEnded") : undefined}
+                >
+                  <FileText size={14} /> {t("payslip.view")}
+                </button>
+                {inProgress && <span className="field-hint">{t("payslip.notEnded")}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {open && <PayslipDocument payslips={[open]} onClose={() => setOpen(null)} />}
+    </div>
   );
 }
 

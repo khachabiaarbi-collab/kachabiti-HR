@@ -6240,3 +6240,1022 @@ body {
   color: var(--ds-text);
 }
 
+/* --- Drawer (employee profile panel) ------------------------------------- */
+.side-panel-backdrop {
+  background: rgb(15 23 42 / 28%);
+  animation: ds-fade-in 0.18s ease-out;
+}
+.side-panel {
+  border-left: 1px solid var(--ds-border);
+  box-shadow: var(--ds-shadow-pop);
+}
+.side-panel.drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
+  padding: 0;
+  overflow: hidden;
+  animation: ds-slide-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.drawer-header {
+  position: relative;
+  flex-shrink: 0;
+  padding: 24px 96px 20px 24px;
+  border-bottom: 1px solid var(--ds-border);
+  background: linear-gradient(180deg, var(--ds-subtle), var(--ds-surface));
+}
+.drawer-header-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 2px;
+}
+.drawer-icon-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  color: var(--ds-text-3);
+}
+.drawer-icon-button:hover {
+  background: rgb(16 24 40 / 6%);
+  color: var(--ds-text);
+}
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 24px 24px;
+}
+.drawer .detail-block {
+  gap: 14px;
+  margin: 0;
+  padding: 22px 0;
+  border-bottom: 1px solid #efeee9;
+  color: var(--ds-text-2);
+  font-size: 13px;
+}
+.drawer .detail-block:last-child {
+  border-bottom: 0;
+}
+.drawer .detail-block > .eyebrow:first-child {
+  margin: 0;
+  color: var(--ds-text);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-transform: none;
+}
+.drawer .detail-block > .page-subtitle {
+  margin: -8px 0 0;
+  color: var(--ds-text-3);
+  font-size: 12.5px;
+}
+.drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.drawer .form-label {
+  margin: 0;
+  min-width: 0;
+}
+.drawer-inline-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.drawer-footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  box-shadow: 0 -8px 20px -16px rgb(16 24 40 / 30%);
+}
+.drawer-footer-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--ds-text-3);
+  font-size: 12.5px;
+}
+.drawer-footer-note.is-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ds-warning);
+  font-weight: 600;
+}
+.drawer-footer-note.is-dirty::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.drawer-footer-note.is-warning {
+  color: var(--ds-text);
+  font-weight: 600;
+}
+
+/* Profile header inside the drawer. */
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.profile-header-avatar {
+  position: relative;
+  flex-shrink: 0;
+}
+.profile-header-avatar .avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 20px;
+  box-shadow: 0 0 0 3px var(--ds-surface), 0 0 0 4px var(--ds-border);
+}
+.profile-header-photo {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--ds-surface);
+  border-radius: 50%;
+  background: var(--ds-text);
+  color: #fff;
+}
+.profile-header-photo:hover:not(:disabled) {
+  background: var(--ds-primary);
+}
+.profile-header-photo .button-spinner {
+  width: 11px;
+  height: 11px;
+}
+.profile-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-header-text h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ds-text);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-header-text > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ds-text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-header-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.profile-header-meta {
+  color: var(--ds-text-3);
+  font-size: 12px;
+}
+
+/* Balance steppers inside the drawer. */
+.drawer .solde-adjust {
+  padding: 10px 12px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+  color: var(--ds-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.drawer .solde-adjust > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.drawer .solde-adjust button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text-2);
+}
+.drawer .solde-adjust button:hover {
+  background: var(--ds-subtle);
+  color: var(--ds-text);
+}
+.drawer .solde-adjust input {
+  width: 72px;
+  height: 32px;
+  border-radius: var(--ds-radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes ds-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .drawer-header {
+    padding: 20px 88px 16px 18px;
+  }
+  .drawer-body {
+    padding: 0 18px 18px;
+  }
+  .drawer-grid {
+    grid-template-columns: 1fr;
+  }
+  .drawer-footer {
+    flex-wrap: wrap;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .drawer-footer-note {
+    flex-basis: 100%;
+  }
+  .drawer-footer > button {
+    flex: 1;
+  }
+  .profile-header-avatar .avatar {
+    width: 52px;
+    height: 52px;
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-panel.drawer,
+  .side-panel-backdrop,
+  .button-spinner {
+    animation: none;
+  }
+}
+
+/* Layers: page chrome (top bar, employee nav, mobile menu ≤ 50) < drawer <
+   modals < toasts. The drawer must cover the sticky top bar. */
+.side-panel-backdrop {
+  z-index: 55;
+}
+.side-panel {
+  z-index: 56;
+}
+.modal-backdrop {
+  z-index: 58;
+}
+.toast {
+  z-index: 70;
+}
+
+/* Drawer sections as tabs; full-page mode puts them in a left column. */
+.drawer [hidden] {
+  display: none !important;
+}
+.drawer-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.drawer-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 0 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ds-border);
+  scrollbar-width: none;
+}
+.drawer-tabs::-webkit-scrollbar {
+  display: none;
+}
+.drawer-tab {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-3);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.drawer-tab:hover {
+  color: var(--ds-text);
+}
+.drawer-tab.is-active {
+  color: var(--ds-text);
+}
+.drawer-tab.is-active::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ds-primary);
+}
+.drawer-tab-alert {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ds-danger);
+}
+.drawer .detail-block {
+  border-bottom: 0;
+}
+
+/* Overview tab: read-only facts, each group links to its edit tab. */
+.drawer-overview {
+  display: grid;
+  gap: 14px;
+  padding: 20px 0;
+}
+.overview-highlight {
+  display: grid;
+  gap: 4px;
+  padding: 18px 20px;
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-primary-soft);
+  color: var(--ds-primary);
+}
+.overview-highlight span {
+  font-size: 12px;
+  font-weight: 600;
+}
+.overview-highlight b {
+  color: var(--ds-text);
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.overview-highlight b small {
+  color: var(--ds-text-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+.overview-highlight em {
+  color: var(--ds-text-2);
+  font-size: 12.5px;
+  font-style: normal;
+}
+.overview-group {
+  padding: 16px 18px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+}
+.overview-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.overview-group-head h3 {
+  margin: 0;
+  color: var(--ds-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+.overview-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--ds-radius-sm);
+  background: transparent;
+  color: var(--ds-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.overview-edit:hover {
+  background: var(--ds-primary-soft);
+}
+.overview-group dl {
+  display: grid;
+  margin: 0;
+}
+.overview-group dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-top: 1px solid #f0efea;
+  font-size: 13px;
+}
+.overview-group dl > div:first-child {
+  border-top: 0;
+}
+.overview-group dt {
+  flex-shrink: 0;
+  color: var(--ds-text-3);
+}
+.overview-group dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ds-text);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* Full page. */
+.side-panel.drawer.is-expanded {
+  width: 100%;
+  border-left: 0;
+}
+.drawer.is-expanded .drawer-header {
+  padding-left: max(32px, calc((100% - 1040px) / 2));
+  padding-right: max(104px, calc((100% - 1040px) / 2));
+}
+.drawer.is-expanded .drawer-main {
+  flex-direction: row;
+  gap: 32px;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+.drawer.is-expanded .drawer-tabs {
+  flex-direction: column;
+  align-self: flex-start;
+  width: 210px;
+  padding: 20px 0;
+  border-bottom: 0;
+  overflow: visible;
+}
+.drawer.is-expanded .drawer-tab {
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--ds-radius-sm);
+}
+.drawer.is-expanded .drawer-tab:hover {
+  background: var(--ds-subtle);
+}
+.drawer.is-expanded .drawer-tab.is-active {
+  background: var(--ds-primary-soft);
+  color: var(--ds-primary);
+}
+.drawer.is-expanded .drawer-tab.is-active::after {
+  display: none;
+}
+.drawer.is-expanded .drawer-body {
+  padding: 4px 4px 32px;
+}
+.drawer.is-expanded .drawer-overview {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.drawer.is-expanded .overview-highlight {
+  grid-column: 1 / -1;
+}
+.drawer.is-expanded .drawer-footer {
+  padding-left: max(32px, calc((100% - 1040px) / 2));
+  padding-right: max(32px, calc((100% - 1040px) / 2));
+}
+
+@media (max-width: 860px) {
+  .drawer.is-expanded .drawer-main {
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+  }
+  .drawer.is-expanded .drawer-tabs {
+    flex-direction: row;
+    align-self: stretch;
+    width: auto;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--ds-border);
+    overflow-x: auto;
+  }
+  .drawer.is-expanded .drawer-tab.is-active {
+    background: transparent;
+    color: var(--ds-text);
+  }
+  .drawer.is-expanded .drawer-tab.is-active::after {
+    display: block;
+  }
+  .drawer.is-expanded .drawer-body {
+    padding: 4px 18px 24px;
+  }
+  .drawer.is-expanded .drawer-overview {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* No sideways scrolling in the drawer: tabs share the width and truncate,
+   only the section content scrolls (vertically). */
+.side-panel.drawer,
+.drawer-main,
+.drawer-body {
+  overflow-x: hidden;
+}
+.drawer-body {
+  overflow-y: auto;
+}
+.drawer-body > *,
+.drawer .detail-block > *,
+.drawer-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.drawer input,
+.drawer select,
+.drawer textarea {
+  max-width: 100%;
+}
+.drawer-tabs {
+  overflow: hidden;
+  padding: 0 12px;
+}
+.drawer-tab {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  padding: 12px 6px;
+}
+.drawer-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-tab-alert {
+  flex-shrink: 0;
+}
+.drawer-tab.is-active::after {
+  right: 6px;
+  left: 6px;
+}
+.drawer.is-expanded .drawer-tabs {
+  overflow: visible;
+}
+.drawer.is-expanded .drawer-tab {
+  flex: none;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+}
+.profile-header,
+.profile-header-text {
+  min-width: 0;
+  max-width: 100%;
+}
+.profile-header-tags > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drawer .solde-adjust > span,
+.drawer .solde-opening-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 860px) {
+  .drawer.is-expanded .drawer-tabs {
+    overflow: hidden;
+    padding: 0 12px;
+  }
+  .drawer.is-expanded .drawer-tab {
+    flex: 1 1 0;
+    justify-content: center;
+    width: auto;
+    padding: 12px 6px;
+  }
+}
+
+/* Overview rows: a long label wraps instead of pushing the value out. */
+.overview-group dl > div {
+  align-items: baseline;
+}
+.overview-group dt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.overview-group dd {
+  flex: 0 1 auto;
+  max-width: 62%;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A second section inside the same tab (Profile → sign-in account). */
+.drawer .drawer-subsection {
+  border-top: 1px solid #efeee9;
+}
+
+/* Employee payslips tab. */
+.employee-payslip-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.employee-payslip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+}
+.employee-payslip-month {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.employee-payslip-month b {
+  color: var(--ds-text);
+  font-size: 14px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.employee-payslip-figures {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+}
+.employee-payslip-figures div {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+.employee-payslip-figures dt {
+  color: var(--ds-text-3);
+  font-size: 11.5px;
+}
+.employee-payslip-figures dd {
+  margin: 0;
+  color: var(--ds-text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.employee-payslip-figures dd.is-net {
+  color: var(--ds-text);
+  font-weight: 650;
+}
+.employee-payslip > .field-hint {
+  grid-column: 1 / -1;
+}
+/* The side panel is narrow: the button goes on its own row. */
+.side-panel.drawer:not(.is-expanded) .employee-payslip {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.side-panel.drawer:not(.is-expanded) .employee-payslip > .secondary-button {
+  grid-column: 1 / -1;
+}
+@media (max-width: 560px) {
+  .employee-payslip {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .employee-payslip > .secondary-button {
+    grid-column: 1 / -1;
+  }
+}
+
+/* No visible scrollbar in the drawer: it still scrolls with the wheel,
+   trackpad, touch and keyboard. Full page scrolls as one area, with the
+   section list pinned on the left. */
+.drawer-body,
+.drawer-main {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.drawer-body::-webkit-scrollbar,
+.drawer-main::-webkit-scrollbar {
+  display: none;
+}
+.drawer.is-expanded .drawer-main {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.drawer.is-expanded .drawer-body {
+  flex: 1;
+  min-width: 0;
+  overflow: visible;
+}
+.drawer.is-expanded .drawer-tabs {
+  position: sticky;
+  top: 0;
+}
+@media (max-width: 860px) {
+  .drawer.is-expanded .drawer-tabs {
+    z-index: 1;
+    background: var(--ds-surface);
+  }
+}
+
+/* Employee attendance tab. */
+.employee-attendance-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.employee-attendance-bar .field-hint {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.employee-attendance-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.employee-attendance-stats > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+}
+.employee-attendance-stats dt {
+  overflow: hidden;
+  color: var(--ds-text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.employee-attendance-stats dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--ds-text);
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.employee-attendance-stats dd small {
+  color: var(--ds-text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.employee-attendance-stats > div.is-warning {
+  border-color: #f1dcb4;
+  background: var(--ds-warning-soft);
+}
+.employee-attendance-stats > div.is-warning dd {
+  color: var(--ds-warning);
+}
+/* Hours on the first row, day counts on the second: nothing sits alone. */
+.employee-attendance-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.employee-attendance-stats > div {
+  grid-column: span 2;
+}
+.employee-attendance-stats > div:nth-child(n + 4) {
+  grid-column: span 3;
+}
+.drawer.is-expanded .employee-attendance-stats {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.drawer.is-expanded .employee-attendance-stats > div,
+.drawer.is-expanded .employee-attendance-stats > div:nth-child(n + 4) {
+  grid-column: auto;
+}
+@media (max-width: 860px) {
+  .drawer.is-expanded .employee-attendance-stats {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .drawer.is-expanded .employee-attendance-stats > div {
+    grid-column: span 2;
+  }
+  .drawer.is-expanded .employee-attendance-stats > div:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+}
+
+/* Attendance days table (employee panel). */
+.stat-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 4px;
+}
+.stat-link:not(:disabled):hover,
+.stat-link[aria-pressed="true"] {
+  text-decoration-color: currentColor;
+}
+.stat-link:disabled {
+  cursor: default;
+}
+.day-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.day-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--ds-border);
+  border-radius: 999px;
+  background: var(--ds-surface);
+  color: var(--ds-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.day-filters button span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--ds-subtle);
+  color: var(--ds-text-3);
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.day-filters button:hover:not(:disabled):not(.is-active) {
+  border-color: var(--ds-border-strong);
+  color: var(--ds-text);
+}
+.day-filters button.is-active {
+  border-color: var(--ds-text);
+  background: var(--ds-text);
+  color: #fff;
+}
+.day-filters button.is-active span {
+  background: rgb(255 255 255 / 18%);
+  color: #fff;
+}
+.day-filters button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.day-table {
+  overflow: clip;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+}
+.day-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.1fr) 52px 60px 64px minmax(64px, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 8px 14px;
+  border-top: 1px solid #f0efea;
+  color: var(--ds-text-2);
+  font-size: 12.5px;
+}
+.day-row > * {
+  min-width: 0;
+}
+.day-row.is-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 36px;
+  border-top: 0;
+  background: var(--ds-subtle);
+  color: var(--ds-text-3);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.day-row:not(.is-head):hover {
+  background: var(--ds-hover);
+}
+.day-row .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.day-row .credited-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.day-date {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  color: var(--ds-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.day-date small {
+  color: var(--ds-primary);
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: none;
+}
+.day-row .attendance-state {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.attendance-state.is-off {
+  background: var(--ds-subtle);
+  color: var(--ds-text-3);
+}
+.day-row.is-today {
+  background: var(--ds-primary-soft);
+  box-shadow: inset 3px 0 0 var(--ds-primary);
+}
+.day-row.is-off {
+  color: var(--ds-text-3);
+}
+.day-row.is-off .day-date {
+  color: var(--ds-text-3);
+  font-weight: 500;
+}
+.day-row.is-absent .day-date {
+  color: var(--ds-danger);
+}
+.day-open {
+  color: var(--ds-success);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.day-table-empty {
+  margin: 0;
+  padding: 24px 16px;
+  border-top: 1px solid #f0efea;
+  color: var(--ds-text-3);
+  font-size: 13px;
+  text-align: center;
+}
+/* The side panel is narrow: the raw worked time is left to full page. */
+.side-panel.drawer:not(.is-expanded) .day-col-worked {
+  display: none;
+}
+.side-panel.drawer:not(.is-expanded) .day-row {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) 44px 50px minmax(56px, auto);
+  gap: 8px;
+  padding: 8px 12px;
+}
+@media (max-width: 560px) {
+  .day-col-worked {
+    display: none;
+  }
+  .day-row,
+  .side-panel.drawer:not(.is-expanded) .day-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 42px 48px minmax(52px, auto);
+    gap: 6px;
+    padding: 8px 10px;
+  }
+}
