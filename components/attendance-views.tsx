@@ -18,6 +18,7 @@ import {
   GripVertical,
   History,
   LoaderCircle,
+  MapPin,
   PencilLine,
   Plus,
   RefreshCw,
@@ -31,9 +32,14 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { Header, Metric } from "@/components/primitives";
+import { Header, Metric, ModernSelect } from "@/components/primitives";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
-import { creditDay, explicitBreakMinutes, type DayCredit } from "@/lib/payroll-calc";
+import {
+  creditDay,
+  explicitBreakMinutes,
+  scheduledAuthorizationMinutes,
+  type DayCredit,
+} from "@/lib/payroll-calc";
 import {
   cloneSegment,
   insertAfter,
@@ -47,6 +53,12 @@ import {
   type LeaveHourTeamItem,
 } from "@/lib/leave-hours";
 import { useLeaveHourBalance } from "@/lib/use-leave-hours";
+import {
+  coordsFromMapsText,
+  googleMapsPinUrl,
+  googleMapsSearchUrl,
+  type WorkLocation,
+} from "@/lib/geo";
 import {
   ATTENDANCE_TIMEZONE,
   formatAttendanceDuration,
@@ -72,6 +84,8 @@ import {
 
 type TodayAttendance = AttendanceDaySummary & {
   previousIncomplete: AttendanceDaySummary | null;
+  locationRequired?: boolean;
+  workLocations?: WorkLocation[];
 };
 
 type CorrectionDraft = {
@@ -104,6 +118,44 @@ function formatClockDay(value: Date, dateLocale: string) {
 function apiMessage(payload: unknown, fallback: string) {
   const response = payload as Partial<AttendanceApiError> | null;
   return response?.error?.message ?? fallback;
+}
+
+function punchErrorMessage(
+  payload: unknown,
+  t: ReturnType<typeof useT>,
+  fallback: string,
+) {
+  const code = (payload as Partial<AttendanceApiError> | null)?.error?.code;
+  if (code === "LOCATION_REQUIRED") return t("att.locationRequired");
+  if (code === "OUTSIDE_WORK_LOCATION") return t("att.outsideLocation");
+  return apiMessage(payload, fallback);
+}
+
+function readDeviceLocation(): Promise<{
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+}> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("LOCATION_UNAVAILABLE"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) =>
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy ?? 0,
+        }),
+      (error) => {
+        reject(
+          new Error(error.code === error.PERMISSION_DENIED ? "LOCATION_DENIED" : "LOCATION_UNAVAILABLE"),
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 15_000 },
+    );
+  });
 }
 
 async function fetchToday(signal?: AbortSignal, fallback?: string) {
@@ -140,22 +192,39 @@ function breakMinutesFromSchedule(segments: { kind: string; startTime: string; e
   return breaks.length ? explicitBreakMinutes(breaks) : null;
 }
 
-function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
-  const segments = item.scheduleSegments
+function workWindows(item: AttendanceDaySummary) {
+  return item.scheduleSegments
     .filter((segment) => segment.kind === "work")
     .map((segment) => ({ start: segment.startTime.slice(0, 5), end: segment.endTime.slice(0, 5) }));
+}
+
+function authorizationWindows(item: AttendanceDaySummary) {
+  return item.authorizations.map((authorization) => ({
+    start: authorization.startTime.slice(0, 5),
+    end: authorization.endTime.slice(0, 5),
+  }));
+}
+
+function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
+  const segments = workWindows(item);
   if (!segments.length) return null;
   const today = localIsoDate();
   const sessions = item.sessions.map((session) => ({
     in: tunisClock.format(new Date(session.entryAt)),
     out: session.exitAt ? tunisClock.format(new Date(session.exitAt)) : null,
   }));
-  const authorizations = item.authorizations.map((authorization) => ({
-    start: authorization.startTime.slice(0, 5),
-    end: authorization.endTime.slice(0, 5),
-  }));
   const now = item.workDate === today ? tunisClock.format(new Date()) : null;
-  return creditDay(segments, sessions, authorizations, now, breakMinutesFromSchedule(item.scheduleSegments));
+  return creditDay(
+    segments,
+    sessions,
+    authorizationWindows(item),
+    now,
+    breakMinutesFromSchedule(item.scheduleSegments),
+  );
+}
+
+function authorizationMinutesForDay(item: AttendanceDaySummary) {
+  return scheduledAuthorizationMinutes(workWindows(item), authorizationWindows(item));
 }
 
 function datetimeLocalValue(value: string) {
@@ -333,12 +402,26 @@ export function EmployeeTimeClock({
     const key = pendingIdempotencyKey.current ?? crypto.randomUUID();
     pendingIdempotencyKey.current = key;
     try {
+      let coords: { latitude: number; longitude: number; accuracyMeters: number } | null = null;
+      if (attendance.locationRequired) {
+        try {
+          coords = await readDeviceLocation();
+        } catch (error) {
+          const code = error instanceof Error ? error.message : "";
+          flash(
+            code === "LOCATION_DENIED" ? t("att.locationDenied") : t("att.locationUnavailable"),
+            "error",
+          );
+          return;
+        }
+      }
       const response = await fetch("/api/attendance/punch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idempotencyKey: key,
           expectedLatestPunchId: attendance.latestPunchId,
+          ...(coords ?? {}),
         }),
       });
       const payload: unknown = await response.json();
@@ -348,7 +431,7 @@ export function EmployeeTimeClock({
           pendingIdempotencyKey.current = null;
           await load();
         }
-        flash(apiMessage(payload, t("att.punchFailed")), "error");
+        flash(punchErrorMessage(payload, t, t("att.punchFailed")), "error");
         return;
       }
       pendingIdempotencyKey.current = null;
@@ -469,6 +552,16 @@ export function EmployeeTimeClock({
           )}
           {attendance.nextAction ? actionLabel : t("att.unavailableAction")}
         </button>
+        {attendance.locationRequired && (
+          <small className="clock-location-hint">
+            <MapPin size={13} />
+            {t("att.locationHint", {
+              places:
+                attendance.workLocations?.map((location) => location.name).join(", ") ||
+                t("att.workplace"),
+            })}
+          </small>
+        )}
         {attendance.blockReason && (
           <small className="clock-block-reason">
             {attendance.blockReason === "MAX_SESSIONS"
@@ -678,6 +771,226 @@ export function AttendanceOverviewCard({
       </strong>
       <span className="attendance-overview-action">{t("common.open")}</span>
     </button>
+  );
+}
+
+type DayFilter = "all" | "absent" | "late" | "incomplete";
+
+/** One employee's month in the employee panel: totals, then each day. */
+export function EmployeeAttendance({ employeeId }: { employeeId: string }) {
+  const { t, dateLocale } = useLanguage();
+  const [month, setMonth] = useState(() => localIsoDate().slice(0, 7));
+  const [items, setItems] = useState<AttendanceReportItem[] | null>(null);
+  const [hours, setHours] = useState<LeaveHourTeamItem | null>(null);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState<DayFilter>("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems(null);
+    setHours(null);
+    setFilter("all");
+    setError("");
+    const today = localIsoDate();
+    const [year, monthNumber] = month.split("-").map(Number);
+    const from = `${month}-01`;
+    const last = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+    const to = last < today ? last : today;
+    if (from > today) {
+      setItems([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ from, to, employeeId, page: "1", pageSize: "100" });
+        const [records, monthly] = await Promise.all([
+          fetch(`/api/attendance?${params}`, { cache: "no-store" }),
+          fetch(`/api/attendance/leave-hours?month=${month}`, { cache: "no-store" }),
+        ]);
+        const payload: unknown = await records.json();
+        if (!records.ok) throw new Error(apiMessage(payload, t("att.recordsFailed")));
+        const monthPayload = monthly.ok
+          ? ((await monthly.json()) as { items?: LeaveHourTeamItem[] })
+          : {};
+        if (cancelled) return;
+        setItems(
+          [...((payload as { items?: AttendanceReportItem[] }).items ?? [])].sort((a, b) =>
+            b.workDate.localeCompare(a.workDate),
+          ),
+        );
+        setHours(monthPayload.items?.find((row) => row.employeeId === employeeId) ?? null);
+      } catch (loadError) {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : t("att.recordsFailed"));
+        setItems([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId, month, t]);
+
+  const days = items ?? [];
+  const today = localIsoDate();
+  const isAbsent = (item: AttendanceReportItem) => item.state === "absent" && item.isWorkingDay;
+  const isLate = (item: AttendanceReportItem) => (creditedForDay(item)?.lateCount ?? 0) > 0;
+  const matches: Record<DayFilter, (item: AttendanceReportItem) => boolean> = {
+    all: () => true,
+    absent: isAbsent,
+    late: isLate,
+    incomplete: (item) => item.state === "incomplete",
+  };
+  const absentDays = days.filter(isAbsent).length;
+  const lateDays = days.filter(isLate).length;
+  const filters: { id: DayFilter; label: string; count: number }[] = [
+    { id: "all", label: t("common.all"), count: days.length },
+    { id: "absent", label: t("drawer.absences"), count: absentDays },
+    { id: "late", label: t("drawer.lateDays"), count: lateDays },
+    { id: "incomplete", label: t("att.incomplete"), count: days.filter(matches.incomplete).length },
+  ];
+  const shown = days.filter(matches[filter]);
+  const dayLabel = (iso: string) =>
+    new Intl.DateTimeFormat(dateLocale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(new Date(`${iso}T00:00:00Z`));
+  const dash = t("common.dash");
+
+  return (
+    <div className="detail-block employee-attendance">
+      <p className="eyebrow">{t("drawer.tabAttendance")}</p>
+      <div className="employee-attendance-bar">
+        <MonthSwitcher value={month} label={t("att.month")} onChange={setMonth} />
+        <span className="field-hint">{t("drawer.attendanceNote")}</span>
+      </div>
+      <dl className="employee-attendance-stats">
+        <div>
+          <dt>{t("att.scheduled")}</dt>
+          <dd>{hours ? `${hours.scheduledHours} h` : dash}</dd>
+        </div>
+        <div>
+          <dt>{t("att.punched")}</dt>
+          <dd>
+            {hours ? `${hours.punchedHours} h` : dash}
+            {hours && hours.scheduledHours > 0 && (
+              <small>{rendementPercent(hours.scheduledHours, hours.punchedHours)} %</small>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("att.extra")}</dt>
+          <dd>{hours ? `${hours.extraHours} h` : dash}</dd>
+        </div>
+        <div className={absentDays > 0 ? "is-warning" : undefined}>
+          <dt>{t("drawer.absences")}</dt>
+          <dd>
+            <button
+              type="button"
+              className="stat-link"
+              disabled={!absentDays}
+              aria-pressed={filter === "absent"}
+              onClick={() => setFilter(filter === "absent" ? "all" : "absent")}
+            >
+              {items ? `${absentDays} ${t("panel.daysShort")}` : dash}
+            </button>
+          </dd>
+        </div>
+        <div className={lateDays > 0 ? "is-warning" : undefined}>
+          <dt>{t("drawer.lateDays")}</dt>
+          <dd>
+            <button
+              type="button"
+              className="stat-link"
+              disabled={!lateDays}
+              aria-pressed={filter === "late"}
+              onClick={() => setFilter(filter === "late" ? "all" : "late")}
+            >
+              {items ? lateDays : dash}
+            </button>
+          </dd>
+        </div>
+      </dl>
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+      {items === null ? (
+        <p className="field-hint">{t("drawer.attendanceLoading")}</p>
+      ) : days.length === 0 ? (
+        !error && <p className="field-hint">{t("drawer.attendanceEmpty")}</p>
+      ) : (
+        <>
+          <div className="day-filters" role="group" aria-label={t("drawer.dayFilters")}>
+            {filters.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={filter === option.id ? "is-active" : undefined}
+                aria-pressed={filter === option.id}
+                disabled={option.id !== "all" && option.count === 0}
+                onClick={() => setFilter(option.id)}
+              >
+                {option.label}
+                <span>{option.count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="day-table" role="table" aria-label={t("drawer.tabAttendance")}>
+            <div className="day-row is-head" role="row">
+              <span role="columnheader">{t("att.colDate")}</span>
+              <span role="columnheader">{t("filter.status")}</span>
+              <span role="columnheader" className="is-num">{t("att.entry")}</span>
+              <span role="columnheader" className="is-num">{t("att.exit")}</span>
+              <span role="columnheader" className="is-num day-col-worked">{t("att.colWorked")}</span>
+              <span role="columnheader" className="is-num" title={t("att.creditedHint")}>
+                {t("att.colCredited")}
+              </span>
+            </div>
+            {shown.length === 0 ? (
+              <p className="day-table-empty">{t("drawer.noDayMatch")}</p>
+            ) : (
+              shown.map((item) => {
+                const off = item.state === "absent" && !item.isWorkingDay;
+                return (
+                  <div
+                    key={item.workDate}
+                    role="row"
+                    className={`day-row${item.workDate === today ? " is-today" : ""}${off ? " is-off" : ""}${isAbsent(item) ? " is-absent" : ""}`}
+                  >
+                    <span role="cell" className="day-date">
+                      {dayLabel(item.workDate)}
+                      {item.workDate === today && <small>{t("drawer.today")}</small>}
+                    </span>
+                    <span role="cell">
+                      <em className={`attendance-state is-${off ? "off" : item.state}`}>
+                        {off ? t("drawer.dayOff") : statusCopy(t, item.state)}
+                      </em>
+                    </span>
+                    <span role="cell" className="is-num">{formatTime(item.firstEntryAt)}</span>
+                    <span role="cell" className="is-num">
+                      {item.state === "present" && !item.lastExitAt ? (
+                        <span className="day-open">{t("drawer.inProgress")}</span>
+                      ) : (
+                        formatTime(item.lastExitAt)
+                      )}
+                    </span>
+                    <span role="cell" className="is-num day-col-worked">
+                      {item.workedMinutes > 0 ? formatAttendanceDuration(item.workedMinutes) : dash}
+                    </span>
+                    <span role="cell" className="is-num">
+                      <CreditedCell item={item} />
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1098,53 +1411,60 @@ export function AdminAttendance({
               </div>
               <label>
                 {t("admin.colEmployee")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("admin.colEmployee")}
                   value={employeeId}
-                  onChange={(event) => {
-                    setEmployeeId(event.target.value);
+                  onChange={(value) => {
+                    setEmployeeId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("att.allEmployees")}</option>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: t("att.allEmployees") },
+                    ...employees.map((employee) => ({
+                      value: employee.id,
+                      label: employee.name,
+                    })),
+                  ]}
+                />
               </label>
               <label>
                 {t("filter.department")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("filter.department")}
                   value={departmentId}
-                  onChange={(event) => {
-                    setDepartmentId(event.target.value);
+                  onChange={(value) => {
+                    setDepartmentId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("admin.allDepartments")}</option>
-                  {departments.map((department) => (
-                    <option key={department.id} value={department.id}>
-                      {department.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: t("admin.allDepartments") },
+                    ...departments.map((department) => ({
+                      value: department.id,
+                      label: department.name,
+                    })),
+                  ]}
+                />
               </label>
               <label>
                 {t("filter.status")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("filter.status")}
                   value={status}
-                  onChange={(event) => {
-                    setStatus(event.target.value);
+                  onChange={(value) => {
+                    setStatus(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("att.allStatuses")}</option>
-                  <option value="present">{t("att.present")}</option>
-                  <option value="absent">{t("att.completed")}</option>
-                  <option value="incomplete">{t("att.incomplete")}</option>
-                  <option value="locked">{t("att.locked")}</option>
-                </select>
+                  options={[
+                    { value: "", label: t("att.allStatuses") },
+                    { value: "present", label: t("att.present") },
+                    { value: "absent", label: t("att.completed") },
+                    { value: "incomplete", label: t("att.incomplete") },
+                    { value: "locked", label: t("att.locked") },
+                  ]}
+                />
               </label>
               <button
                 type="button"
@@ -1268,15 +1588,17 @@ export function AdminAttendance({
               <p className="eyebrow">{t("att.reviewQueue")}</p>
               <h2>{t("att.corrections")}</h2>
             </div>
-            <select
+            <ModernSelect
+              ariaLabel={t("filter.status")}
               value={correctionStatus}
-              onChange={(event) => setCorrectionStatus(event.target.value)}
-            >
-              <option value="">{t("att.allStatuses")}</option>
-              <option value="pending">{translateStatus(t, "pending")}</option>
-              <option value="approved">{translateStatus(t, "approved")}</option>
-              <option value="rejected">{translateStatus(t, "rejected")}</option>
-            </select>
+              onChange={setCorrectionStatus}
+              options={[
+                { value: "", label: t("att.allStatuses") },
+                { value: "pending", label: translateStatus(t, "pending") },
+                { value: "approved", label: translateStatus(t, "approved") },
+                { value: "rejected", label: translateStatus(t, "rejected") },
+              ]}
+            />
           </div>
           {loading ? (
             <div className="attendance-report-empty">
@@ -1484,7 +1806,11 @@ function AttendanceRecordDetail({
         ) : (
           item.authorizations.map((authorization) => (
             <span key={authorization.id}>
-              <b>{authorization.startTime.slice(0, 5)}–{authorization.endTime.slice(0, 5)}</b>
+              <b>
+                {authorization.startTime.slice(0, 5)}–{authorization.endTime.slice(0, 5)}
+                {" · "}
+                {formatAttendanceDuration(authorization.durationMinutes)}
+              </b>
               {authorization.reason}
             </span>
           ))
@@ -1823,96 +2149,111 @@ export function AttendanceScheduleSettings({
 
   return (
     <div className="attendance-settings-editor">
-      <div className="schedule-picker">
-        <label className="form-label">
-          {t("att.schedule")}
-          <select value={selectedId} onChange={(event) => selectSchedule(event.target.value)}>
-            {schedules.map((schedule) => (
-              <option key={schedule.id} value={schedule.id}>
-                {schedule.name}
-                {schedule.isDefault ? t("att.defaultSuffix") : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="form-label">
-          {t("att.scheduleName")}
-          <input
-            value={draft.name}
-            onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <button type="button" className="secondary-button" onClick={startNewSchedule}>
-          <Plus size={14} /> {t("att.newSchedule")}
-        </button>
-      </div>
+      <section className="settings-block">
+        <header>
+          <h3>{t("att.schedule")}</h3>
+          <p>{t("att.scheduleNote")}</p>
+        </header>
+        <div className="schedule-picker">
+          <label className="form-label">
+            {t("att.schedule")}
+            <ModernSelect
+              block
+              ariaLabel={t("att.schedule")}
+              value={selectedId}
+              onChange={selectSchedule}
+              options={schedules.map((schedule) => ({
+                value: schedule.id,
+                label: `${schedule.name}${schedule.isDefault ? t("att.defaultSuffix") : ""}`,
+              }))}
+            />
+          </label>
+          <label className="form-label">
+            {t("att.scheduleName")}
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+          </label>
+          <button type="button" className="secondary-button" onClick={startNewSchedule}>
+            <Plus size={14} /> {t("att.newSchedule")}
+          </button>
+        </div>
+      </section>
 
-      <div className="attendance-settings-grid">
-        <label className="form-label">
-          {t("att.timezone")}
-          <input value={settings.timezone} readOnly />
-        </label>
-        <label className="form-label">
-          {t("att.grace")}
-          <input
-            type="number"
-            min={0}
-            max={120}
-            value={settings.graceMinutes}
-            onChange={(event) =>
-              setSettings({ ...settings, graceMinutes: Number(event.target.value) })
-            }
-          />
-        </label>
-        <label className="form-label">
-          {t("att.maxSessionsLabel")}
-          <input
-            type="number"
-            min={1}
-            max={5}
-            value={settings.maxSessions}
-            onChange={(event) =>
-              setSettings({ ...settings, maxSessions: Number(event.target.value) })
-            }
-          />
-        </label>
-      </div>
+      <section className="settings-block">
+        <header>
+          <h3>{t("att.rules")}</h3>
+          <p>{t("att.rulesNote")}</p>
+        </header>
+        <div className="attendance-settings-grid">
+          <label className="form-label">
+            {t("att.timezone")}
+            <input value={settings.timezone} readOnly />
+            <small className="field-help">{t("att.timezoneHelp")}</small>
+          </label>
+          <label className="form-label">
+            {t("att.maxSessionsLabel")}
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={settings.maxSessions}
+              onChange={(event) =>
+                setSettings({ ...settings, maxSessions: Number(event.target.value) })
+              }
+            />
+            <small className="field-help">{t("att.maxSessionsHelp")}</small>
+          </label>
+        </div>
+      </section>
 
+      <section className="settings-block">
       <div className="schedule-editor-head">
         <div>
-          <p className="eyebrow">{t("att.weekly")}</p>
           <h3>{t("att.weeklyTitle")}</h3>
           <p className="page-subtitle">{t("att.breakHint")}</p>
         </div>
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() =>
-            setDraft({
-              ...draft,
-              segments: [
-                ...draft.segments,
-                {
-                  isoWeekday: 1,
-                  kind: "work",
-                  startTime: "08:00",
-                  endTime: "17:00",
-                  position: draft.segments.length + 1,
-                },
-              ],
-            })
-          }
-        >
-          <Plus size={14} /> {t("att.addSegment")}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={!copiedSegment}
-          onClick={() => void pasteSegment(draft.segments.length - 1)}
-        >
-          <ClipboardPaste size={14} /> {t("att.pasteSegment")}
-        </button>
+        <div className="settings-block-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() =>
+              setDraft({
+                ...draft,
+                segments: [
+                  ...draft.segments,
+                  {
+                    isoWeekday: 1,
+                    kind: "work",
+                    startTime: "08:00",
+                    endTime: "17:00",
+                    position: draft.segments.length + 1,
+                  },
+                ],
+              })
+            }
+          >
+            <Plus size={14} /> {t("att.addSegment")}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!copiedSegment}
+            onClick={() => void pasteSegment(draft.segments.length - 1)}
+          >
+            <ClipboardPaste size={14} /> {t("att.pasteSegment")}
+          </button>
+        </div>
+      </div>
+      <div className="schedule-segment-head" aria-hidden="true">
+        <span />
+        <span>{t("att.columnDay")}</span>
+        <span>{t("att.columnKind")}</span>
+        <span>{t("att.columnStart")}</span>
+        <span />
+        <span>{t("att.columnEnd")}</span>
+        <span />
       </div>
       <div className="schedule-segment-list">
         {draft.segments.map((segment, index) => (
@@ -1944,33 +2285,36 @@ export function AttendanceScheduleSettings({
             >
               <GripVertical size={15} />
             </button>
-            <select
-              value={segment.isoWeekday}
-              onChange={(event) =>
-                updateSegment(index, "isoWeekday", Number(event.target.value))
-              }
-            >
-              {WEEKDAY_KEYS.map((dayKey, dayIndex) => (
-                <option key={dayKey} value={dayIndex + 1}>
-                  {t(dayKey)}
-                </option>
-              ))}
-            </select>
-            <select
+            <ModernSelect
+              block
+              ariaLabel={t("att.columnDay")}
+              value={String(segment.isoWeekday)}
+              onChange={(value) => updateSegment(index, "isoWeekday", Number(value))}
+              options={WEEKDAY_KEYS.map((dayKey, dayIndex) => ({
+                value: String(dayIndex + 1),
+                label: t(dayKey),
+              }))}
+            />
+            <ModernSelect
+              block
+              ariaLabel={t("att.columnKind")}
               value={segment.kind}
-              onChange={(event) => updateSegment(index, "kind", event.target.value)}
-            >
-              <option value="work">{t("att.work")}</option>
-              <option value="break">{t("att.break")}</option>
-            </select>
+              onChange={(value) => updateSegment(index, "kind", value)}
+              options={[
+                { value: "work", label: t("att.work") },
+                { value: "break", label: t("att.break") },
+              ]}
+            />
             <input
               type="time"
+              aria-label={t("att.columnStart")}
               value={segment.startTime.slice(0, 5)}
               onChange={(event) => updateSegment(index, "startTime", event.target.value)}
             />
             <span>{t("att.segmentTo")}</span>
             <input
               type="time"
+              aria-label={t("att.columnEnd")}
               value={segment.endTime.slice(0, 5)}
               onChange={(event) => updateSegment(index, "endTime", event.target.value)}
             />
@@ -2006,6 +2350,7 @@ export function AttendanceScheduleSettings({
           </div>
         ))}
       </div>
+      </section>
 
       <ScheduleAssignments
         assignments={draft.assignments ?? []}
@@ -2013,12 +2358,232 @@ export function AttendanceScheduleSettings({
         onChange={(assignments) => setDraft({ ...draft, assignments })}
       />
 
-      {error && <p className="correction-error">{error}</p>}
-      <button type="button" className="primary-button" disabled={saving} onClick={save}>
-        {saving ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
-        {t("att.saveSettings")}
-      </button>
+      <div className="settings-savebar">
+        <div>
+          {error && <p className="correction-error">{error}</p>}
+          <p>{t("att.saveNote")}</p>
+        </div>
+        <button type="button" className="primary-button" disabled={saving} onClick={save}>
+          {saving ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
+          {t("att.saveSettings")}
+        </button>
+      </div>
+      <WorkLocationSettings flash={flash} />
     </div>
+  );
+}
+
+function WorkLocationSettings({
+  flash,
+}: {
+  flash: (message: string, tone?: "success" | "error") => void;
+}) {
+  const t = useT();
+  const [locations, setLocations] = useState<WorkLocation[]>([]);
+  const [name, setName] = useState("");
+  const [mapsQuery, setMapsQuery] = useState("");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [radiusMeters, setRadiusMeters] = useState("150");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const response = await fetch("/api/attendance/locations", { cache: "no-store" });
+    const payload: unknown = await response.json();
+    if (!response.ok) throw new Error(apiMessage(payload, t("att.locationsFailed")));
+    setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
+  }, [t]);
+
+  useEffect(() => {
+    void load().catch(() => undefined);
+  }, [load]);
+
+  const applyPoint = (latitudeValue: number, longitudeValue: number) => {
+    setLatitude(String(latitudeValue));
+    setLongitude(String(longitudeValue));
+  };
+
+  const applyMapsText = (value: string) => {
+    setMapsQuery(value);
+    const point = coordsFromMapsText(value);
+    if (point) applyPoint(point.latitude, point.longitude);
+  };
+
+  const resetDraft = () => {
+    setEditingId(null);
+    setName("");
+    setMapsQuery("");
+    setLatitude("");
+    setLongitude("");
+    setRadiusMeters("150");
+  };
+
+  const openGoogleMaps = () => {
+    const pinned =
+      latitude && longitude
+        ? { latitude: Number(latitude), longitude: Number(longitude) }
+        : coordsFromMapsText(mapsQuery);
+    const url = pinned
+      ? googleMapsPinUrl(pinned)
+      : googleMapsSearchUrl(mapsQuery || name);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const useHere = async () => {
+    try {
+      const here = await readDeviceLocation();
+      applyPoint(here.latitude, here.longitude);
+      window.open(googleMapsPinUrl(here), "_blank", "noopener,noreferrer");
+    } catch {
+      flash(t("att.locationUnavailable"), "error");
+    }
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/attendance/locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingId,
+          name,
+          latitude,
+          longitude,
+          radiusMeters,
+          isActive: true,
+        }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        flash(apiMessage(payload, t("att.locationSaveFailed")), "error");
+        return;
+      }
+      setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
+      resetDraft();
+      flash(t("att.locationSaved"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/attendance/locations?id=${id}`, { method: "DELETE" });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        flash(apiMessage(payload, t("att.locationSaveFailed")), "error");
+        return;
+      }
+      setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
+      if (editingId === id) resetDraft();
+      flash(t("att.locationRemoved"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="settings-block work-location-settings">
+      <header>
+        <h3>{t("att.workLocations")}</h3>
+        <p>{t("att.workLocationsNote")}</p>
+      </header>
+      {locations.length === 0 ? (
+        <p className="page-subtitle">{t("att.noWorkLocations")}</p>
+      ) : (
+        <ul className="work-location-list">
+          {locations.map((location) => (
+            <li key={location.id}>
+              <div>
+                <b>{location.name}</b>
+                <span>
+                  {location.radiusMeters} m
+                  {location.isActive ? "" : ` · ${t("status.inactive")}`}
+                </span>
+              </div>
+              <div>
+                <a
+                  className="icon-button"
+                  href={googleMapsPinUrl(location)}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={t("att.seeOnMaps")}
+                >
+                  <MapPin size={14} />
+                </a>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={t("att.editLocation")}
+                  onClick={() => {
+                    setEditingId(location.id);
+                    setName(location.name);
+                    setMapsQuery(googleMapsPinUrl(location));
+                    setLatitude(String(location.latitude));
+                    setLongitude(String(location.longitude));
+                    setRadiusMeters(String(location.radiusMeters));
+                  }}
+                >
+                  <PencilLine size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={t("common.delete")}
+                  onClick={() => void remove(location.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="work-location-form">
+        <label className="form-label">
+          {t("att.locationName")}
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label className="form-label work-location-maps">
+          {t("att.mapsSearch")}
+          <input
+            value={mapsQuery}
+            placeholder={t("att.mapsSearchPlaceholder")}
+            onChange={(event) => applyMapsText(event.target.value)}
+          />
+        </label>
+        <label className="form-label">
+          {t("att.radiusMeters")}
+          <input
+            type="number"
+            min={30}
+            max={2000}
+            value={radiusMeters}
+            onChange={(event) => setRadiusMeters(event.target.value)}
+          />
+        </label>
+        <p className="page-subtitle">
+          {latitude && longitude
+            ? `${t("att.mapsPicked")}: ${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`
+            : t("att.mapsNeedPin")}
+        </p>
+        <div className="work-location-actions">
+          <button type="button" className="secondary-button" onClick={openGoogleMaps}>
+            <MapPin size={14} /> {t("att.openGoogleMaps")}
+          </button>
+          <button type="button" className="secondary-button" onClick={() => void useHere()}>
+            {t("att.useMyPosition")}
+          </button>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>
+            {busy ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
+            {editingId ? t("att.saveLocation") : t("att.addLocation")}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2033,7 +2598,7 @@ function ScheduleAssignments({
 }) {
   const t = useT();
   return (
-    <div className="schedule-assignment-editor">
+    <section className="settings-block schedule-assignment-editor">
       <div className="schedule-editor-head">
         <div>
           <p className="eyebrow">{t("att.overrides")}</p>
@@ -2060,45 +2625,52 @@ function ScheduleAssignments({
       </div>
       {assignments.map((assignment, index) => (
         <div className="schedule-assignment-row" key={assignment.id ?? index}>
-          <select
-            value={assignment.employeeId}
-            onChange={(event) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index
-                    ? { ...item, employeeId: event.target.value }
-                    : item,
-                ),
-              )
-            }
-          >
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
-          <DatePicker
-            value={assignment.effectiveFrom}
-            onChange={(value) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index ? { ...item, effectiveFrom: value } : item,
-                ),
-              )
-            }
-          />
-          <DatePicker
-            value={assignment.effectiveTo ?? ""}
-            min={assignment.effectiveFrom || undefined}
-            onChange={(value) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index ? { ...item, effectiveTo: value || null } : item,
-                ),
-              )
-            }
-          />
+          <label>
+            <span>{t("att.assignPerson")}</span>
+            <ModernSelect
+              block
+              ariaLabel={t("att.assignPerson")}
+              value={assignment.employeeId}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, employeeId: value } : item,
+                  ),
+                )
+              }
+              options={employees.map((employee) => ({
+                value: employee.id,
+                label: employee.name,
+              }))}
+            />
+          </label>
+          <label>
+            <span>{t("att.assignFrom")}</span>
+            <DatePicker
+              value={assignment.effectiveFrom}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, effectiveFrom: value } : item,
+                  ),
+                )
+              }
+            />
+          </label>
+          <label>
+            <span>{t("att.assignUntil")}</span>
+            <DatePicker
+              value={assignment.effectiveTo ?? ""}
+              min={assignment.effectiveFrom || undefined}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, effectiveTo: value || null } : item,
+                  ),
+                )
+              }
+            />
+          </label>
           <button
             type="button"
             aria-label={t("att.removeAssignment")}
@@ -2115,7 +2687,7 @@ function ScheduleAssignments({
           {t("att.noOverrides")}
         </p>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -2213,44 +2785,55 @@ function CorrectionRequestModal({
         {direct && (
           <label className="form-label">
             {t("admin.colEmployee")}
-            <select
+            <ModernSelect
+              block
+              ariaLabel={t("admin.colEmployee")}
               value={employeeId}
-              onChange={(event) => setEmployeeId(event.target.value)}
               disabled={Boolean(direct.employeeId)}
-              required
-            >
-              <option value="">{t("att.chooseEmployeeOption")}</option>
-              {direct.employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name}
-                </option>
-              ))}
-            </select>
+              onChange={setEmployeeId}
+              options={[
+                { value: "", label: t("att.chooseEmployeeOption") },
+                ...direct.employees.map((employee) => ({
+                  value: employee.id,
+                  label: employee.name,
+                })),
+              ]}
+            />
           </label>
         )}
         <label className="form-label">
           {t("att.operation")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("att.operation")}
             value={operation}
-            onChange={(event) => setOperation(event.target.value as CorrectionOperation)}
             disabled={!draft.target}
-          >
-            <option value="add">{t("att.addPunch")}</option>
-            {draft.target && <option value="change">{t("att.changePunch")}</option>}
-            {draft.target && <option value="void">{t("att.removePunch")}</option>}
-          </select>
+            onChange={(value) => setOperation(value as CorrectionOperation)}
+            options={[
+              { value: "add", label: t("att.addPunch") },
+              ...(draft.target
+                ? [
+                    { value: "change", label: t("att.changePunch") },
+                    { value: "void", label: t("att.removePunch") },
+                  ]
+                : []),
+            ]}
+          />
         </label>
         {operation !== "void" && (
           <div className="form-row">
             <label className="form-label">
               {t("att.punchType")}
-              <select
+              <ModernSelect
+                block
+                ariaLabel={t("att.punchType")}
                 value={type}
-                onChange={(event) => setType(event.target.value as AttendancePunchType)}
-              >
-                <option value="entry">{t("att.entry")}</option>
-                <option value="exit">{t("att.exit")}</option>
-              </select>
+                onChange={(value) => setType(value as AttendancePunchType)}
+                options={[
+                  { value: "entry", label: t("att.entry") },
+                  { value: "exit", label: t("att.exit") },
+                ]}
+              />
             </label>
           </div>
         )}
@@ -2337,11 +2920,22 @@ function CreditedCell({ item }: { item: AttendanceReportItem }) {
   const t = useT();
   const credit = creditedForDay(item);
   if (!credit) return <span className="credited-cell is-empty">{t("common.dash")}</span>;
+  const authorizationMinutes = authorizationMinutesForDay(item);
+  const showMarks =
+    credit.lateCount > 0 ||
+    credit.earlyLeaveCount > 0 ||
+    credit.overtimeMinutes > 0 ||
+    authorizationMinutes > 0;
   return (
     <span className="credited-cell" title={t("att.creditedHint")}>
       <b>{formatAttendanceDuration(credit.creditedMinutes)}</b>
-      {(credit.lateCount > 0 || credit.earlyLeaveCount > 0 || credit.overtimeMinutes > 0) && (
+      {showMarks && (
         <small>
+          {authorizationMinutes > 0 && (
+            <em className="is-authz">
+              {t("att.badgeAuthz", { hours: formatAttendanceDuration(authorizationMinutes) })}
+            </em>
+          )}
           {credit.lateCount > 0 && <em className="is-late">{t("att.badgeLate")}</em>}
           {credit.earlyLeaveCount > 0 && <em className="is-early">{t("att.badgeEarly")}</em>}
           {credit.overtimeMinutes > 0 && (
@@ -2357,8 +2951,12 @@ function CreditedCell({ item }: { item: AttendanceReportItem }) {
 function CountedTodayMetric({ attendance }: { attendance: AttendanceDaySummary }) {
   const t = useT();
   const credit = creditedForDay(attendance);
+  const authorizationMinutes = authorizationMinutesForDay(attendance);
   const marks = credit
     ? [
+        authorizationMinutes > 0
+          ? t("att.badgeAuthz", { hours: formatAttendanceDuration(authorizationMinutes) })
+          : "",
         credit.lateCount > 0 ? t("att.badgeLate") : "",
         credit.earlyLeaveCount > 0 && attendance.state !== "present" ? t("att.badgeEarly") : "",
         credit.overtimeMinutes > 0 ? `+${formatAttendanceDuration(credit.overtimeMinutes)} ${t("att.overtimeShort")}` : "",

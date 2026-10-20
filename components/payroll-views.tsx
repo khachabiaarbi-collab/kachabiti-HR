@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { Employee } from "@/lib/app-types";
 import { ConfirmModal } from "@/components/modals";
-import { Avatar, Button, Field, Header, Metric } from "@/components/primitives";
+import { Avatar, Button, Field, Header, Metric, ModernSelect } from "@/components/primitives";
 import { useLanguage } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import { formatDisplayDate, isoDate } from "@/lib/map-rows";
@@ -60,6 +60,7 @@ import {
   loadComponents,
   loadContractPeriods,
   loadEmployeeComponents,
+  loadEmployeePayslips,
   loadMyPayslips,
   loadPublishedPayslips,
   loadPayslips,
@@ -84,6 +85,7 @@ import {
   type PayslipWarning,
   type PayrollRun,
   type PayrollSettings,
+  type RunStatus,
 } from "@/lib/payroll-run";
 import {
   annualTaxCsv,
@@ -316,17 +318,16 @@ export function ContractSection({
       )}
       <label className="form-label">
         {t("contract.type")}
-        <select
-          name="contract_type"
+        <ModernSelect
+          block
+          ariaLabel={t("contract.type")}
           value={form.contractType}
-          onChange={(event) => set("contractType", event.target.value as ContractType)}
-        >
-          {CONTRACT_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {t(`contract.type.${type}`)}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => set("contractType", value as ContractType)}
+          options={CONTRACT_TYPES.map((type) => ({
+            value: type,
+            label: t(`contract.type.${type}`),
+          }))}
+        />
       </label>
       {(contractNeedsEnd(form.contractType) || form.contractEnd) && (
         <Field
@@ -340,14 +341,16 @@ export function ContractSection({
       )}
       <label className="form-label">
         {t("contract.payBasis")}
-        <select
-          name="pay_basis"
+        <ModernSelect
+          block
+          ariaLabel={t("contract.payBasis")}
           value={form.payBasis}
-          onChange={(event) => set("payBasis", event.target.value as PayBasis)}
-        >
-          <option value="monthly">{t("contract.payBasis.monthly")}</option>
-          <option value="hourly">{t("contract.payBasis.hourly")}</option>
-        </select>
+          onChange={(value) => set("payBasis", value as PayBasis)}
+          options={[
+            { value: "monthly", label: t("contract.payBasis.monthly") },
+            { value: "hourly", label: t("contract.payBasis.hourly") },
+          ]}
+        />
       </label>
       {form.payBasis === "monthly" ? (
         <Field
@@ -394,17 +397,16 @@ export function ContractSection({
       <p className="eyebrow contract-subhead">{t("contract.family")}</p>
       <label className="form-label">
         {t("contract.maritalStatus")}
-        <select
-          name="marital_status"
+        <ModernSelect
+          block
+          ariaLabel={t("contract.maritalStatus")}
           value={form.maritalStatus}
-          onChange={(event) => set("maritalStatus", event.target.value as MaritalStatus)}
-        >
-          {MARITAL_STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {t(`contract.marital.${status}`)}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => set("maritalStatus", value as MaritalStatus)}
+          options={MARITAL_STATUSES.map((status) => ({
+            value: status,
+            label: t(`contract.marital.${status}`),
+          }))}
+        />
       </label>
       <label className="form-check">
         <input
@@ -569,18 +571,19 @@ function FixedComponentsSection({
         </div>
       )}
       <div className="pay-item-add">
-        <select
-          aria-label={t("payroll.component")}
+        <ModernSelect
+          block
+          ariaLabel={t("payroll.component")}
           value={componentId}
-          onChange={(event) => setComponentId(event.target.value)}
-        >
-          <option value="">{t("payroll.chooseComponent")}</option>
-          {active.map((component) => (
-            <option key={component.id} value={component.id}>
-              {component.name}
-            </option>
-          ))}
-        </select>
+          onChange={setComponentId}
+          options={[
+            { value: "", label: t("payroll.chooseComponent") },
+            ...active.map((component) => ({
+              value: component.id,
+              label: component.name,
+            })),
+          ]}
+        />
         <input
           type="number"
           step="0.001"
@@ -1224,6 +1227,8 @@ function PayslipPanel({
       outsideHours: String(current.outsideHours ?? 0),
       unpaidHours: String(current.unpaidHours ?? 0),
       notYetHours: String(current.notYetHours ?? 0),
+      paidLeaveHours: String(current.paidLeaveHours ?? 0),
+      holidayHours: String(current.holidayHours ?? 0),
     };
   });
   const [oneOff, setOneOff] = useState<PayItem[]>(inputs.oneOff);
@@ -1313,6 +1318,11 @@ function PayslipPanel({
             {inputs.attendance.clock && (
               <dl className="payslip-clock">
                 <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockPunched")}</dt><dd>{(inputs.attendance.clock.punchedHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockPaidLeave")}</dt><dd>{(inputs.attendance.clock.paidLeaveHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                {(inputs.attendance.clock.holidayHours ?? 0) > 0 && (
+                  <div><dt>{t("payroll.clockHoliday")}</dt><dd>{(inputs.attendance.clock.holidayHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                )}
                 <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
                 <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
                 {inputs.attendance.clock.notYetHours > 0 && (
@@ -1407,18 +1417,19 @@ function PayslipPanel({
               </div>
             )}
             <div className="pay-item-add">
-              <select
-                aria-label={t("payroll.component")}
+              <ModernSelect
+                block
+                ariaLabel={t("payroll.component")}
                 value={componentId}
-                onChange={(event) => setComponentId(event.target.value)}
-              >
-                <option value="">{t("payroll.chooseComponent")}</option>
-                {catalog.map((component) => (
-                  <option key={component.id} value={component.id}>
-                    {component.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setComponentId}
+                options={[
+                  { value: "", label: t("payroll.chooseComponent") },
+                  ...catalog.map((component) => ({
+                    value: component.id,
+                    label: component.name,
+                  })),
+                ]}
+              />
               <input
                 type="number"
                 step="0.001"
@@ -1791,15 +1802,21 @@ function RatesPanel({
           />
           <label className="form-label">
             {t("payroll.componentKind")}
-            <select
+            <ModernSelect
+              block
+              ariaLabel={t("payroll.componentKind")}
               value={draft.kind}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, kind: event.target.value as PayComponent["kind"] }))
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  kind: value as PayComponent["kind"],
+                }))
               }
-            >
-              <option value="earning">{t("payroll.kindEarning")}</option>
-              <option value="deduction">{t("payroll.kindDeduction")}</option>
-            </select>
+              options={[
+                { value: "earning", label: t("payroll.kindEarning") },
+                { value: "deduction", label: t("payroll.kindDeduction") },
+              ]}
+            />
           </label>
           {draft.kind === "earning" && (
             <>
@@ -2126,6 +2143,93 @@ export function MyPayslips({
   );
 }
 
+/** Admin view of one employee's payslips, used in the employee panel. */
+export function EmployeePayslips({
+  employeeId,
+  flash: rawFlash,
+}: {
+  employeeId: string;
+  flash: (message: string, tone?: "success" | "error") => void;
+}) {
+  const flash = useStableFlash(rawFlash);
+  const { t, dateLocale } = useLanguage();
+  const [rows, setRows] = useState<{ payslip: Payslip; status: RunStatus }[] | null>(null);
+  const [open, setOpen] = useState<Payslip | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    loadEmployeePayslips(employeeId)
+      .then((items) => {
+        if (!cancelled) setRows(items);
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        if (!isMissingPayrollTable(error.message)) flash(error.message, "error");
+        setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId, flash]);
+
+  return (
+    <div className="detail-block employee-payslips">
+      <p className="eyebrow">{t("drawer.tabPayslips")}</p>
+      <p className="page-subtitle">{t("payslip.employeeNote")}</p>
+      {rows === null ? (
+        <p className="field-hint">{t("payslip.loading")}</p>
+      ) : rows.length === 0 ? (
+        <p className="field-hint">{t("payslip.employeeEmpty")}</p>
+      ) : (
+        <ul className="employee-payslip-list">
+          {rows.map(({ payslip, status }) => {
+            const inProgress = isMonthInProgress(payslip.period);
+            return (
+              <li key={payslip.id} className="employee-payslip">
+                <div className="employee-payslip-month">
+                  <b>{monthLabel(payslip.period, dateLocale)}</b>
+                  <span
+                    className={`status-pill ${status === "draft" ? "status-pending" : "status-approved"}`}
+                  >
+                    <span className="status-dot" />
+                    {status === "paid"
+                      ? t("payroll.status.paid")
+                      : status === "validated"
+                        ? t("payroll.status.validated")
+                        : t("payroll.status.draft")}
+                  </span>
+                </div>
+                <dl className="employee-payslip-figures">
+                  <div>
+                    <dt>{t("payroll.gross")}</dt>
+                    <dd>{formatTnd(payslip.gross, dateLocale)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("payroll.net")}</dt>
+                    <dd className="is-net">{formatTnd(payslip.net, dateLocale)}</dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setOpen(payslip)}
+                  disabled={inProgress}
+                  title={inProgress ? t("payslip.notEnded") : undefined}
+                >
+                  <FileText size={14} /> {t("payslip.view")}
+                </button>
+                {inProgress && <span className="field-hint">{t("payslip.notEnded")}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {open && <PayslipDocument payslips={[open]} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Exports (CSV for the accountant and the bank portal)
 // ---------------------------------------------------------------------------
@@ -2286,14 +2390,16 @@ function PaySimulator({ payslip }: { payslip: Payslip }) {
           aria-label={t("payroll.simQuantity")}
           onChange={(event) => setValue(event.target.value)}
         />
-        <select
-          aria-label={t("payroll.simUnit")}
+        <ModernSelect
+          block
+          ariaLabel={t("payroll.simUnit")}
           value={unit}
-          onChange={(event) => setUnit(event.target.value as "days" | "hours")}
-        >
-          <option value="days">{t("payroll.simDays")}</option>
-          <option value="hours">{t("payroll.simHours")}</option>
-        </select>
+          onChange={(value) => setUnit(value as "days" | "hours")}
+          options={[
+            { value: "days", label: t("payroll.simDays") },
+            { value: "hours", label: t("payroll.simHours") },
+          ]}
+        />
       </div>
       <dl>
         <div><dt>{t("payroll.simHourValue")}</dt><dd>{money(result.hourValue)}</dd></div>

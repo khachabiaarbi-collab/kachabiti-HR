@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Minus, Paperclip, Plus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, Maximize2, Minimize2, Minus, Paperclip, Pencil, Plus, X } from "lucide-react";
 import type {
   Authorization,
   Department,
@@ -10,8 +10,9 @@ import type {
   LeaveRequest,
   LeaveType,
 } from "@/lib/app-types";
-import { ContractSection } from "@/components/payroll-views";
-import { Avatar, Button, Field, Status } from "@/components/primitives";
+import { EmployeeAttendance } from "@/components/attendance-views";
+import { ContractSection, EmployeePayslips } from "@/components/payroll-views";
+import { Avatar, Button, Field, ModernSelect, Status } from "@/components/primitives";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -51,7 +52,8 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
-import { updateEmployeeAccount } from "@/lib/employee-account";
+import { saveEmployeeSolde, updateEmployeeAccount } from "@/lib/employee-account";
+import { uploadEmployeeAvatar } from "@/lib/employee-avatar";
 import type { VacationFigure } from "@/lib/use-leave-hours";
 import {
   formatDaysLabel,
@@ -286,20 +288,20 @@ export function RequestModal({
         )}
         <label className="form-label">
           {t("modal.leaveType")}
-          <select
-            name="leave_type_id"
+          <ModernSelect
+            block
+            ariaLabel={t("modal.leaveType")}
             value={leaveTypeId}
-            onChange={(event) => chooseType(event.target.value)}
-          >
-            {leaveTypes.length === 0 && (
-              <option value="">{t("modal.noTypes")}</option>
-            )}
-            {leaveTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {leaveTypeLabel(t, type.name)}
-              </option>
-            ))}
-          </select>
+            onChange={chooseType}
+            options={
+              leaveTypes.length === 0
+                ? [{ value: "", label: t("modal.noTypes") }]
+                : leaveTypes.map((type) => ({
+                    value: type.id,
+                    label: leaveTypeLabel(t, type.name),
+                  }))
+            }
+          />
         </label>
         <div className="form-row">
           <Field
@@ -608,14 +610,17 @@ export function EventModal({
         </div>
         <label className="form-label">
           {t("modal.eventType")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("modal.eventType")}
             value={type}
-            onChange={(event) => setType(event.target.value)}
-          >
-            <option value="Company Holiday">{t("modal.companyHoliday")}</option>
-            <option value="Team Event">{t("modal.teamEvent")}</option>
-            <option value="Other">{t("modal.other")}</option>
-          </select>
+            onChange={setType}
+            options={[
+              { value: "Company Holiday", label: t("modal.companyHoliday") },
+              { value: "Team Event", label: t("modal.teamEvent") },
+              { value: "Other", label: t("modal.other") },
+            ]}
+          />
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
@@ -701,17 +706,19 @@ export function DepartmentModal({
         </label>
         <label className="form-label">
           {t("modal.assignManager")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("modal.assignManager")}
             value={managerId}
-            onChange={(e) => setManagerId(e.target.value)}
-          >
-            <option value="">{t("department.unassigned")}</option>
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
+            onChange={setManagerId}
+            options={[
+              { value: "", label: t("department.unassigned") },
+              ...employees.map((employee) => ({
+                value: employee.id,
+                label: employee.name,
+              })),
+            ]}
+          />
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
@@ -824,30 +831,33 @@ export function EmployeeModal({
         <div className="form-row">
           <label className="form-label">
             {t("profile.department")}
-            <select
-              name="department_id"
+            <ModernSelect
+              block
+              ariaLabel={t("profile.department")}
               value={departmentId}
-              onChange={(event) => setDepartmentId(event.target.value)}
-            >
-              <option value="">{t("department.unassigned")}</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.id}>
-                  {department.name}
-                </option>
-              ))}
-            </select>
+              onChange={setDepartmentId}
+              options={[
+                { value: "", label: t("department.unassigned") },
+                ...departments.map((department) => ({
+                  value: department.id,
+                  label: department.name,
+                })),
+              ]}
+            />
           </label>
           <label className="form-label">
             {t("profile.role")}
-            <select
-              name="role"
+            <ModernSelect
+              block
+              ariaLabel={t("profile.role")}
               value={role}
-              onChange={(event) => setRole(event.target.value)}
-            >
-              <option value="Employee">{translateRole(t, "Employee")}</option>
-              <option value="Manager">{translateRole(t, "Manager")}</option>
-              <option value="Administrator">{translateRole(t, "Administrator")}</option>
-            </select>
+              onChange={setRole}
+              options={[
+                { value: "Employee", label: translateRole(t, "Employee") },
+                { value: "Manager", label: translateRole(t, "Manager") },
+                { value: "Administrator", label: translateRole(t, "Administrator") },
+              ]}
+            />
           </label>
         </div>
         <Field
@@ -934,8 +944,86 @@ export function EmployeeDetail({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
   const t = useT();
   const { dateLocale } = useLanguage();
+  const [errors, setErrors] = useState<{
+    name: string | null;
+    email: string | null;
+    monthly: string | null;
+  }>({ name: null, email: null, monthly: null });
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [tab, setTab] = useState<EmployeeTab>("overview");
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(DRAWER_EXPANDED_KEY) === "1") setExpanded(true);
+    } catch {
+      // Storage blocked: keep the side panel.
+    }
+  }, []);
+  const toggleExpanded = () => {
+    setExpanded((value) => {
+      try {
+        window.localStorage.setItem(DRAWER_EXPANDED_KEY, value ? "0" : "1");
+      } catch {
+        // Private mode: the choice just isn't remembered.
+      }
+      return !value;
+    });
+  };
+  const snapshot = JSON.stringify([
+    name,
+    email,
+    phone,
+    jobTitle,
+    departmentId,
+    role,
+    status,
+    startDate,
+    monthlyLeaveDays,
+    solde,
+  ]);
+  const [baseline, setBaseline] = useState(snapshot);
+  const dirty = snapshot !== baseline;
+  const requestClose = () => {
+    if (dirty) setConfirmingDiscard(true);
+    else close();
+  };
+
+  useEffect(() => {
+    if (!dirty) setConfirmingDiscard(false);
+  }, [dirty]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (dirty) setConfirmingDiscard(true);
+      else close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dirty, close]);
+
+  const uploadPhoto = async (file: File | null) => {
+    if (!file || uploadingPhoto || saving) return;
+    setUploadingPhoto(true);
+    const payload = new FormData();
+    payload.append("file", file);
+    payload.append("employeeId", employee.id);
+    try {
+      const uploaded = await uploadEmployeeAvatar(payload);
+      if (uploaded.error) {
+        flash(uploaded.error, "error");
+        return;
+      }
+      onSaved({ ...employee, avatarUrl: uploaded.url }, solde);
+      flash(t("profile.photoUpdated"));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   const changePassword = async () => {
     if (savingPassword) return;
@@ -988,7 +1076,17 @@ export function EmployeeDetail({
   };
 
   const save = async () => {
-    if (!name.trim() || !email.trim() || saving) return;
+    if (saving) return;
+    const nextErrors = {
+      name: name.trim() ? null : t("drawer.nameRequired"),
+      email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? null : t("drawer.emailInvalid"),
+      monthly: Number.isFinite(Number(monthlyLeaveDays)) && Number(monthlyLeaveDays) > 0
+        ? null
+        : t("drawer.rateInvalid"),
+    };
+    setErrors(nextErrors);
+    if (nextErrors.name || nextErrors.email) return setTab("profile");
+    if (nextErrors.monthly) return setTab("employment");
     setSaving(true);
     // The sign-in email lives in Supabase Auth: change it there first.
     if (canManageAccounts && email.trim().toLowerCase() !== employee.email.trim().toLowerCase()) {
@@ -1037,18 +1135,17 @@ export function EmployeeDetail({
     }
 
     if (solde.length) {
-      const { error: soldeError } = await supabase.from("leave_balances").upsert(
-        solde.map((row) => ({
-          employee_id: employee.id,
-          leave_type_id: row.leaveTypeId,
-          days_remaining: row.daysRemaining,
+      const soldeError = await saveEmployeeSolde({
+        employeeId: employee.id,
+        rows: solde.map((row) => ({
+          leaveTypeId: row.leaveTypeId,
+          daysRemaining: row.daysRemaining,
         })),
-        { onConflict: "employee_id,leave_type_id" },
-      );
+      });
 
       if (soldeError) {
         setSaving(false);
-        flash(soldeError.message, "error");
+        flash(soldeError, "error");
         return;
       }
     }
@@ -1068,119 +1165,340 @@ export function EmployeeDetail({
       initials: initialsFromName(name.trim()),
     };
     onSaved(nextEmployee, solde);
+    setBaseline(snapshot);
     flash(t("panel.saved"));
     setSaving(false);
   };
 
+  const departmentName =
+    departments.find((department) => department.id === departmentId)?.name ??
+    employee.department;
+  const departmentLabel =
+    departmentName === "Unassigned" ? t("department.unassigned") : departmentName;
+  const tabs: { id: EmployeeTab; label: string; invalid?: boolean }[] = [
+    { id: "overview", label: t("drawer.tabOverview") },
+    { id: "profile", label: t("drawer.profile"), invalid: Boolean(errors.name || errors.email) },
+    { id: "employment", label: t("profile.employment"), invalid: Boolean(errors.monthly) },
+    { id: "balance", label: t("drawer.tabBalance") },
+    { id: "attendance", label: t("drawer.tabAttendance") },
+    ...(canManagePayroll
+      ? [
+          { id: "payslips" as const, label: t("drawer.tabPayslips") },
+          { id: "contract" as const, label: t("drawer.tabContract") },
+        ]
+      : []),
+  ];
+  const panelProps = (id: EmployeeTab) => ({
+    role: "tabpanel",
+    id: `employee-panel-${id}`,
+    "aria-labelledby": `employee-tab-${id}`,
+    hidden: tab !== id,
+  });
+  const onTabKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const keys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const index = tabs.findIndex((item) => item.id === tab);
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (index + (event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1) + tabs.length) %
+            tabs.length;
+    setTab(tabs[next].id);
+    document.getElementById(`employee-tab-${tabs[next].id}`)?.focus();
+  };
+
   return (
     <>
-      <div className="side-panel-backdrop" onMouseDown={close} aria-hidden="true" />
-      <div className="side-panel">
-        <button type="button" className="panel-close" onClick={close}>
-          <X size={18} />
-        </button>
-        <Avatar e={employee} />
-        <h2>{name || employee.name}</h2>
-        <p>
-          {displayValue(jobTitle)} · {employee.department}
-        </p>
-        <div className="employee-edit-form">
-          <div className="detail-block">
-            <p className="eyebrow">{t("panel.details")}</p>
-            <Field label={t("profile.fullName")} name="full_name" value={name} onChange={setName} />
-            <Field
-              label={t("profile.workEmail")}
-              name="email"
-              value={email}
-              onChange={canManageAccounts ? setEmail : undefined}
-              readOnly={!canManageAccounts}
-            />
-            {canManageAccounts && <span className="contract-hint">{t("panel.emailNote")}</span>}
-            <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
-            <Field label={t("profile.jobTitle")} name="job_title" value={jobTitle} onChange={setJobTitle} />
-            <label className="form-label">
-              {t("profile.department")}
-              <select
-                name="department_id"
-                value={departmentId}
-                onChange={(event) => setDepartmentId(event.target.value)}
-              >
-                <option value="">{t("department.unassigned")}</option>
-                {departments.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-label">
-              {t("profile.role")}
-              <select
-                name="role"
-                value={role}
-                onChange={(event) => setRole(event.target.value)}
-              >
-                <option value="Employee">{translateRole(t, "Employee")}</option>
-                <option value="Manager">{translateRole(t, "Manager")}</option>
-                <option value="Administrator">{translateRole(t, "Administrator")}</option>
-              </select>
-            </label>
-            <label className="form-label">
-              {t("profile.status")}
-              <select
-                name="status"
-                value={status}
-                onChange={(event) => setStatus(event.target.value)}
-              >
-                <option value="Active">{translateStatus(t, "Active")}</option>
-                <option value="Inactive">{translateStatus(t, "Inactive")}</option>
-              </select>
-            </label>
-            <Field
-              label={t("profile.startDate")}
-              name="start_date"
-              type="date"
-              value={startDate}
-              onChange={(value) => applyHireSolde(value, monthlyLeaveDays)}
-            />
-            <Field
-              label={t("profile.monthlyDays")}
-              name="monthly_leave_days"
-              type="number"
-              step="0.01"
-              value={monthlyLeaveDays}
-              onChange={(value) => applyHireSolde(startDate, value)}
-            />
-            <span className="contract-hint">{t("panel.rateNote")}</span>
+      <div className="side-panel-backdrop" onMouseDown={requestClose} aria-hidden="true" />
+      <aside
+        className={`side-panel drawer${expanded ? " is-expanded" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-drawer-title"
+      >
+        <header className="drawer-header">
+          <EmployeeProfileHeader
+            employee={employee}
+            name={name || employee.name}
+            jobTitle={jobTitle}
+            department={departmentLabel}
+            role={role}
+            status={status}
+            startDate={startDate}
+            uploadingPhoto={uploadingPhoto}
+            onPickPhoto={() => {
+              if (uploadingPhoto || saving) return;
+              photoInput.current?.click();
+            }}
+          />
+          <input
+            ref={photoInput}
+            className="profile-photo-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              void uploadPhoto(file);
+            }}
+          />
+          <div className="drawer-header-actions">
+            <button
+              type="button"
+              className="drawer-icon-button"
+              aria-label={expanded ? t("drawer.collapse") : t("drawer.expand")}
+              title={expanded ? t("drawer.collapse") : t("drawer.expand")}
+              onClick={toggleExpanded}
+            >
+              {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+            <button
+              type="button"
+              className="drawer-icon-button"
+              aria-label={t("drawer.close")}
+              title={t("drawer.close")}
+              onClick={requestClose}
+            >
+              <X size={18} />
+            </button>
           </div>
-          {canManageAccounts && (
-            <div className="detail-block">
-              <p className="eyebrow">{t("panel.accountTitle")}</p>
-              <span className="contract-hint">{t("panel.accountNote")}</span>
-              <Field
-                label={t("panel.newPassword")}
-                name="new_password"
-                type="password"
-                value={newPassword}
-                onChange={setNewPassword}
-              />
-              <Field
-                label={t("panel.confirmPassword")}
-                name="confirm_password"
-                type="password"
-                value={confirmPassword}
-                onChange={setConfirmPassword}
-              />
-              <Button secondary onClick={() => void changePassword()}>
-                {savingPassword ? t("modal.saving") : t("panel.setPassword")}
-              </Button>
+        </header>
+
+        <div className="drawer-main">
+        <div
+          className="drawer-tabs"
+          role="tablist"
+          aria-label={t("drawer.sections")}
+          aria-orientation={expanded ? "vertical" : "horizontal"}
+          onKeyDown={onTabKey}
+        >
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              id={`employee-tab-${item.id}`}
+              aria-selected={tab === item.id}
+              aria-controls={`employee-panel-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+              className={`drawer-tab${tab === item.id ? " is-active" : ""}`}
+              title={item.label}
+              onClick={() => setTab(item.id)}
+            >
+              <span className="drawer-tab-label">{item.label}</span>
+              {item.invalid && <span className="drawer-tab-alert" aria-label={t("drawer.tabHasError")} />}
+            </button>
+          ))}
+        </div>
+
+        <div className="drawer-body employee-edit-form">
+          <section className="drawer-overview" {...panelProps("overview")}>
+            <div className="overview-highlight">
+              <span>{t("drawer.annualNow")}</span>
+              <b>
+                {vacation ? (
+                  <>
+                    {formatLeaveDayCount(vacation.balanceDays, dateLocale, 2)}{" "}
+                    <small>{t("panel.daysShort")}</small>
+                  </>
+                ) : (
+                  t("common.dash")
+                )}
+              </b>
+              <em>
+                {t("drawer.ratePerMonth", {
+                  days: formatLeaveDayCount(Number(monthlyLeaveDays) || 0, dateLocale),
+                })}
+              </em>
             </div>
+            <OverviewGroup
+              title={t("profile.contact")}
+              onEdit={() => setTab("profile")}
+              rows={[
+                [t("profile.workEmail"), email],
+                [t("profile.phone"), displayValue(phone)],
+              ]}
+            />
+            <OverviewGroup
+              title={t("profile.employment")}
+              onEdit={() => setTab("employment")}
+              rows={[
+                [t("profile.jobTitle"), displayValue(jobTitle)],
+                [t("profile.department"), departmentLabel],
+                [t("profile.role"), translateRole(t, role)],
+                [t("profile.status"), translateStatus(t, status)],
+                [
+                  t("profile.startDate"),
+                  startDate ? formatDisplayDate(startDate, dateLocale) : t("common.dash"),
+                ],
+              ]}
+            />
+            {solde.length > 0 && (
+              <OverviewGroup
+                title={t("drawer.tabBalance")}
+                onEdit={() => setTab("balance")}
+                rows={solde.map((row) => [
+                  leaveTypeLabel(t, row.typeName),
+                  `${formatLeaveDayCount(row.daysRemaining, dateLocale, 2)}\u00a0${t("panel.daysShort")}`,
+                ])}
+              />
+            )}
+          </section>
+
+          <section className="detail-block drawer-section" {...panelProps("profile")}>
+            <p className="eyebrow">{t("drawer.profile")}</p>
+            <div className="drawer-grid">
+              <Field
+                label={t("profile.fullName")}
+                name="full_name"
+                value={name}
+                onChange={setName}
+                required
+                error={errors.name}
+              />
+              <Field
+                label={t("profile.jobTitle")}
+                name="job_title"
+                value={jobTitle}
+                onChange={setJobTitle}
+              />
+              <Field
+                label={t("profile.workEmail")}
+                name="email"
+                value={email}
+                onChange={canManageAccounts ? setEmail : undefined}
+                readOnly={!canManageAccounts}
+                required={canManageAccounts}
+                hint={canManageAccounts ? t("panel.emailNote") : undefined}
+                error={errors.email}
+              />
+              <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
+            </div>
+          </section>
+
+          {canManageAccounts && (
+            <section className="detail-block drawer-section drawer-subsection" hidden={tab !== "profile"}>
+              <p className="eyebrow">{t("panel.accountTitle")}</p>
+              <span className="field-hint">{t("panel.accountNote")}</span>
+              <div className="drawer-grid">
+                <Field
+                  label={t("panel.newPassword")}
+                  name="new_password"
+                  type="password"
+                  value={newPassword}
+                  onChange={setNewPassword}
+                />
+                <Field
+                  label={t("panel.confirmPassword")}
+                  name="confirm_password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                />
+              </div>
+              <div className="drawer-inline-action">
+                <span className="field-hint">{t("drawer.savedSeparately")}</span>
+                <Button
+                  secondary
+                  busy={savingPassword}
+                  disabled={!newPassword}
+                  onClick={() => void changePassword()}
+                >
+                  {t("panel.setPassword")}
+                </Button>
+              </div>
+            </section>
           )}
-          <div className="detail-block">
-            <p className="eyebrow">{t("panel.solde")}</p>
+
+          <section className="detail-block drawer-section" {...panelProps("employment")}>
+            <p className="eyebrow">{t("profile.employment")}</p>
+            <div className="drawer-grid">
+              <label className="form-label">
+                <span className="form-label-text">{t("profile.department")}</span>
+                <ModernSelect
+                  block
+                  ariaLabel={t("profile.department")}
+                  value={departmentId}
+                  onChange={setDepartmentId}
+                  options={[
+                    { value: "", label: t("department.unassigned") },
+                    ...departments.map((department) => ({
+                      value: department.id,
+                      label: department.name,
+                    })),
+                  ]}
+                />
+              </label>
+              <label className="form-label">
+                <span className="form-label-text">{t("profile.role")}</span>
+                <ModernSelect
+                  block
+                  ariaLabel={t("profile.role")}
+                  value={role}
+                  onChange={setRole}
+                  options={[
+                    { value: "Employee", label: translateRole(t, "Employee") },
+                    { value: "Manager", label: translateRole(t, "Manager") },
+                    { value: "Administrator", label: translateRole(t, "Administrator") },
+                  ]}
+                />
+              </label>
+            </div>
+            <div className="form-label">
+              <span className="form-label-text" id="employee-status-label">
+                {t("profile.status")}
+              </span>
+              <div
+                className="segmented"
+                role="radiogroup"
+                aria-labelledby="employee-status-label"
+              >
+                {(["Active", "Inactive"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={status === value}
+                    className={status === value ? "is-active" : undefined}
+                    onClick={() => setStatus(value)}
+                  >
+                    <span className={`segmented-dot is-${value.toLowerCase()}`} />
+                    {translateStatus(t, value)}
+                  </button>
+                ))}
+              </div>
+              <span className="field-hint">{t("drawer.statusHint")}</span>
+            </div>
+            <div className="drawer-grid">
+              <Field
+                label={t("profile.startDate")}
+                name="start_date"
+                type="date"
+                value={startDate}
+                onChange={(value) => applyHireSolde(value, monthlyLeaveDays)}
+              />
+              <Field
+                label={t("profile.monthlyDays")}
+                name="monthly_leave_days"
+                type="number"
+                step="0.01"
+                min="0"
+                value={monthlyLeaveDays}
+                onChange={(value) => applyHireSolde(startDate, value)}
+                error={errors.monthly}
+              />
+            </div>
+            <span className="field-hint">{t("panel.rateNote")}</span>
+          </section>
+
+          <section className="detail-block drawer-section" {...panelProps("balance")}>
+            <p className="eyebrow">{t("drawer.tabBalance")}</p>
             <p className="page-subtitle">{t("panel.soldeNote")}</p>
             {solde.length === 0 ? (
-              <span>{t("panel.noTypes")}</span>
+              <span className="field-hint">{t("panel.noTypes")}</span>
             ) : (
               solde.map((row, index) => (
                 <div className="solde-adjust" key={`${row.leaveTypeId}-${row.typeName}-${index}`}>
@@ -1206,6 +1524,7 @@ export function EmployeeDetail({
                       name={`solde-${row.leaveTypeId || index}`}
                       step={1}
                       value={row.daysRemaining}
+                      aria-label={leaveTypeLabel(t, row.typeName)}
                       onChange={(event) => setSoldeValue(index, event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") event.preventDefault();
@@ -1232,16 +1551,152 @@ export function EmployeeDetail({
                 <small>{t("panel.accrualNote")}</small>
               </div>
             )}
+          </section>
+
+
+          <div {...panelProps("attendance")}>
+            {tab === "attendance" && <EmployeeAttendance employeeId={employee.id} />}
           </div>
-          <Button onClick={() => void save()}>
-            {saving ? t("modal.saving") : t("panel.saveChanges")}
-          </Button>
           {canManagePayroll && (
-            <ContractSection employeeId={employee.id} flash={flash} />
+            <div {...panelProps("payslips")}>
+              {tab === "payslips" && <EmployeePayslips employeeId={employee.id} flash={flash} />}
+            </div>
+          )}
+          {canManagePayroll && (
+            <div {...panelProps("contract")}>
+              <ContractSection employeeId={employee.id} flash={flash} />
+            </div>
+          )}
+        </div>
+        </div>
+
+        <footer className="drawer-footer">
+          {confirmingDiscard ? (
+            <>
+              <span className="drawer-footer-note is-warning">{t("drawer.discardQuestion")}</span>
+              <Button secondary onClick={() => setConfirmingDiscard(false)}>
+                {t("drawer.keepEditing")}
+              </Button>
+              <button type="button" className="danger-button" onClick={close}>
+                {t("drawer.discard")}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className={`drawer-footer-note${dirty ? " is-dirty" : ""}`}>
+                {dirty ? t("drawer.unsaved") : t("drawer.noChanges")}
+              </span>
+              <Button secondary onClick={requestClose}>
+                {t("common.cancel")}
+              </Button>
+              <Button busy={saving} disabled={!dirty} onClick={() => void save()}>
+                {t("panel.saveChanges")}
+              </Button>
+            </>
+          )}
+        </footer>
+      </aside>
+    </>
+  );
+}
+
+type EmployeeTab =
+  | "overview"
+  | "profile"
+  | "employment"
+  | "balance"
+  | "attendance"
+  | "payslips"
+  | "contract";
+
+const DRAWER_EXPANDED_KEY = "employee-drawer-expanded";
+
+/** Read-only facts with a shortcut to the tab where they are edited. */
+function OverviewGroup({
+  title,
+  rows,
+  onEdit,
+}: {
+  title: string;
+  rows: [string, string][];
+  onEdit: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="overview-group">
+      <div className="overview-group-head">
+        <h3>{title}</h3>
+        <button type="button" className="overview-edit" onClick={onEdit}>
+          <Pencil size={13} /> {t("drawer.edit")}
+        </button>
+      </div>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function EmployeeProfileHeader({
+  employee,
+  name,
+  jobTitle,
+  department,
+  role,
+  status,
+  startDate,
+  uploadingPhoto,
+  onPickPhoto,
+}: {
+  employee: Employee;
+  name: string;
+  jobTitle: string;
+  department: string;
+  role: string;
+  status: string;
+  startDate: string;
+  uploadingPhoto: boolean;
+  onPickPhoto: () => void;
+}) {
+  const { t, dateLocale } = useLanguage();
+  return (
+    <div className="profile-header">
+      <div className="profile-header-avatar">
+        <Avatar e={employee} />
+        <button
+          type="button"
+          className="profile-header-photo"
+          onClick={onPickPhoto}
+          aria-label={
+            employee.avatarUrl ? t("profile.changePhoto") : t("profile.uploadPhoto")
+          }
+          title={employee.avatarUrl ? t("profile.changePhoto") : t("profile.uploadPhoto")}
+          disabled={uploadingPhoto}
+        >
+          {uploadingPhoto ? <span className="button-spinner" aria-hidden="true" /> : <Camera size={13} />}
+        </button>
+      </div>
+      <div className="profile-header-text">
+        <h2 id="employee-drawer-title">{name}</h2>
+        <p>
+          {jobTitle.trim() || t("profile.noJob")} · {department}
+        </p>
+        <div className="profile-header-tags">
+          <Status status={status} />
+          <span className="role-chip">{translateRole(t, role)}</span>
+          {startDate && (
+            <span className="profile-header-meta">
+              {t("drawer.since", { date: formatDisplayDate(startDate, dateLocale) })}
+            </span>
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

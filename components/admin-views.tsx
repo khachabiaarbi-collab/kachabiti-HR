@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   Building2,
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Clock3,
   Palmtree,
   Eye,
@@ -33,9 +36,9 @@ import type {
 import {
   Avatar,
   Button,
-  Field,
   FilterBar,
   Header,
+  ModernSelect,
   LeaveTypeLabel,
   Metric,
   Pagination,
@@ -62,8 +65,8 @@ import {
   authorizationMonthKey,
   displayLeaveType,
   displayValue,
-  DEFAULT_MONTHLY_LEAVE_DAYS,
   daysInMonth,
+  DEFAULT_MONTHLY_LEAVE_DAYS,
   employeeBalances,
   firstName,
   formatDisplayDate,
@@ -78,9 +81,15 @@ import {
   requestedLeaveDays,
 } from "@/lib/map-rows";
 import {
+  formatLeaveDayCount,
   punchedMinutesByEmployee,
   uncoveredAuthorizationMinutes,
 } from "@/lib/leave-hours";
+import {
+  analyticsYearOptions,
+  buildLeaveAnalytics,
+  type LeaveKind,
+} from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
 import { holidaysInMonth, loadTunisiaHolidays } from "@/lib/tunisia-holidays";
 import {
@@ -88,6 +97,7 @@ import {
   deleteEmployeeRecord,
 } from "@/lib/delete-records";
 import {
+  filterOptionLabel,
   formatDaysLabel,
   screenLabel,
   translateRole,
@@ -478,7 +488,15 @@ export function AdminView({
     );
   }
   if (active === "Analytics") {
-    return <Analytics requests={requests} employees={employees} />;
+    return (
+      <Analytics
+        requests={requests}
+        employees={employees}
+        leaveTypes={leaveTypes}
+        authorizations={authorizations}
+        onOpenEmployee={setSelected}
+      />
+    );
   }
   if (active === "Settings") {
     return (
@@ -766,6 +784,15 @@ function Dashboard({
   );
 }
 
+type PeopleSortKey = "name" | "department" | "balance";
+
+/** Matches the states shown in the annual balance column. */
+function balanceKind(days: number | undefined) {
+  if (days === undefined) return "notSet";
+  if (days < 0) return "advance";
+  return days === 0 ? "empty" : "available";
+}
+
 function People({
   employees,
   setEmployees,
@@ -795,11 +822,29 @@ function People({
   currentEmployee: Employee | null;
   flash: (message: string, tone?: "success" | "error") => void;
 }) {
-  const t = useT();
+  const { t, dateLocale } = useLanguage();
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("All");
+  const [role, setRole] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [balanceState, setBalanceState] = useState("All");
+  const [sort, setSort] = useState<{ key: PeopleSortKey; dir: 1 | -1 }>({
+    key: "name",
+    dir: 1,
+  });
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<Employee | null>(null);
+  const annualDays = useMemo(() => {
+    const days = new Map<string, number>();
+    for (const balance of balances) {
+      if (!isAnnualLeaveType({ name: balance.typeName })) continue;
+      days.set(
+        balance.employeeId,
+        (days.get(balance.employeeId) ?? 0) + balance.daysRemaining,
+      );
+    }
+    return days;
+  }, [balances]);
   const filtered = employees.filter(
     (employee) =>
       (
@@ -812,13 +857,67 @@ function People({
       )
         .toLowerCase()
         .includes((query || globalSearch).toLowerCase()) &&
-      (department === "All" || employee.department === department),
+      (department === "All" || employee.department === department) &&
+      (role === "All" || employee.role === role) &&
+      (status === "All" || employee.status === status) &&
+      (balanceState === "All" ||
+        balanceKind(annualDays.get(employee.id)) === balanceState),
   );
-  const paged = paginate(filtered, page);
+  const sorted = [...filtered].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, dateLocale);
+    if (sort.key === "name") return byName * sort.dir;
+    const compared =
+      sort.key === "department"
+        ? a.department.localeCompare(b.department, dateLocale)
+        : (annualDays.get(a.id) ?? Number.NEGATIVE_INFINITY) -
+          (annualDays.get(b.id) ?? Number.NEGATIVE_INFINITY);
+    return compared * sort.dir || byName;
+  });
+  const paged = paginate(sorted, page);
+  const filtersActive =
+    query !== "" ||
+    department !== "All" ||
+    role !== "All" ||
+    status !== "All" ||
+    balanceState !== "All";
+  const resetFilters = () => {
+    setQuery("");
+    setDepartment("All");
+    setRole("All");
+    setStatus("All");
+    setBalanceState("All");
+  };
+  const sortHeader = (key: PeopleSortKey, label: string) => (
+    <button
+      type="button"
+      className={`sort-head${sort.key === key ? " is-sorted" : ""}`}
+      aria-label={t("people.sortBy", { column: label })}
+      onClick={() =>
+        setSort((current) =>
+          current.key === key
+            ? { key, dir: current.dir === 1 ? -1 : 1 }
+            : { key, dir: key === "balance" ? -1 : 1 },
+        )
+      }
+    >
+      {label}
+      {sort.key !== key ? (
+        <ChevronsUpDown size={11} />
+      ) : sort.dir === 1 ? (
+        <ArrowUp size={11} />
+      ) : (
+        <ArrowDown size={11} />
+      )}
+    </button>
+  );
+
+  useEffect(() => {
+    setQuery(globalSearch);
+  }, [globalSearch]);
 
   useEffect(() => {
     setPage(1);
-  }, [query, department, globalSearch]);
+  }, [query, department, role, status, balanceState, sort, globalSearch]);
 
   return (
     <>
@@ -835,8 +934,10 @@ function People({
         <FilterBar
           search={query}
           setSearch={setQuery}
+          onReset={filtersActive ? resetFilters : undefined}
           filters={[
             {
+              label: "Department",
               value: department,
               setValue: setDepartment,
               options: [
@@ -845,17 +946,68 @@ function People({
                   new Set(employees.map((employee) => employee.department)),
                 ),
               ],
+              optionLabel: (option) =>
+                option === "All"
+                  ? t("people.allDepartments")
+                  : filterOptionLabel(t, option),
+            },
+            {
+              label: t("filter.role"),
+              value: role,
+              setValue: setRole,
+              options: ["All", "Administrator", "Manager", "Employee"],
+              optionLabel: (option) =>
+                option === "All" ? t("people.allRoles") : translateRole(t, option),
+            },
+            {
+              label: "Status",
+              value: status,
+              setValue: setStatus,
+              options: ["All", "Active", "Inactive"],
+              optionLabel: (option) =>
+                option === "All"
+                  ? t("people.allStatuses")
+                  : filterOptionLabel(t, option),
+            },
+            {
+              label: t("people.balanceFilter"),
+              value: balanceState,
+              setValue: setBalanceState,
+              options: ["All", "available", "empty", "advance", "notSet"],
+              optionLabel: (option) =>
+                option === "available"
+                  ? t("admin.balanceAvailable")
+                  : option === "empty"
+                    ? t("admin.balanceEmpty")
+                    : option === "advance"
+                      ? t("admin.balanceAdvance")
+                      : option === "notSet"
+                        ? t("admin.notSet")
+                        : t("people.allBalances"),
             },
           ]}
         />
+        {employees.length > 0 && (
+          <p className="people-count">
+            {t("people.count", { shown: filtered.length, total: employees.length })}
+          </p>
+        )}
         {filtered.length > 0 && (
           <div className="employee-row people-row people-head">
-            <span>{t("admin.colEmployee")}</span>
+            {sortHeader("name", t("admin.colEmployee"))}
             <span>{t("admin.colEmail")}</span>
             <span>{t("admin.colPhone")}</span>
-            <span>{t("filter.department")}</span>
-            <span>{t("admin.colVacation")}</span>
+            {sortHeader("department", t("filter.department"))}
+            {sortHeader("balance", t("admin.colVacation"))}
             <span />
+          </div>
+        )}
+        {filtered.length === 0 && employees.length > 0 && (
+          <div className="people-empty">
+            <p>{t("people.noMatch")}</p>
+            <Button secondary onClick={resetFilters}>
+              {t("common.reset")}
+            </Button>
           </div>
         )}
         {paged.items.map((employee) => {
@@ -864,7 +1016,9 @@ function People({
           );
           return (
             <div
-              className="employee-row people-row is-selectable"
+              className={`employee-row people-row is-selectable${
+                employee.status === "Inactive" ? " is-inactive" : ""
+              }`}
               key={employee.id}
               role="button"
               tabIndex={0}
@@ -879,7 +1033,12 @@ function People({
               <div className="table-member">
                 <Avatar e={employee} />
                 <div>
-                  <b>{employee.name}</b>
+                  <b>
+                    {employee.name}
+                    {employee.status === "Inactive" && (
+                      <em className="people-status-tag">{t("status.inactive")}</em>
+                    )}
+                  </b>
                   <span>
                     {translateRole(t, employee.role)}
                     {employee.jobTitle ? ` · ${employee.jobTitle}` : ""}
@@ -897,30 +1056,46 @@ function People({
                 {solde.length === 0 ? (
                   <span className="leave-balance-empty">{t("admin.notSet")}</span>
                 ) : (
-                  solde.map((balance) => (
-                    <span
-                      key={balance.leaveTypeId}
-                      className={`leave-balance-chip ${
-                        balance.daysRemaining < 0
-                          ? "is-negative"
-                          : balance.daysRemaining === 0
-                            ? "is-empty"
-                            : ""
-                      }`}
-                      title={t("admin.balanceTitle", {
-                        type: leaveTypeLabel(t, balance.typeName),
-                        days: balance.daysRemaining,
-                      })}
-                    >
-                      <span>
-                        {leaveTypeLabel(t, balance.typeName)}
-                      </span>
-                      <b>
-                        {balance.daysRemaining}
-                        <small>d</small>
-                      </b>
-                    </span>
-                  ))
+                  solde.map((balance) => {
+                    const days = balance.daysRemaining;
+                    const yearly =
+                      (employee.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS) * 12;
+                    const share =
+                      yearly > 0 ? Math.min(Math.max(days / yearly, 0), 1) : 0;
+                    const tone = days < 0 ? "is-negative" : days === 0 ? "is-empty" : "";
+                    return (
+                      <div
+                        key={balance.leaveTypeId}
+                        className={`leave-balance-cell ${tone}`}
+                        title={`${t("admin.balanceTitle", {
+                          type: leaveTypeLabel(t, balance.typeName),
+                          days: formatLeaveDayCount(days, dateLocale),
+                        })} · ${t("admin.balanceYear", {
+                          days: formatLeaveDayCount(yearly, dateLocale),
+                        })}`}
+                      >
+                        {solde.length > 1 && (
+                          <span className="leave-balance-type">
+                            {leaveTypeLabel(t, balance.typeName)}
+                          </span>
+                        )}
+                        <div className="leave-balance-figure">
+                          <b>{formatLeaveDayCount(days, dateLocale, 2)}</b>
+                          <small>{t("panel.daysShort")}</small>
+                          <em>
+                            {days < 0
+                              ? t("admin.balanceAdvance")
+                              : days === 0
+                                ? t("admin.balanceEmpty")
+                                : t("admin.balanceAvailable")}
+                          </em>
+                        </div>
+                        <span className="leave-balance-meter" aria-hidden="true">
+                          <i style={{ width: `${share * 100}%` }} />
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
               <div className="row-actions">
@@ -1830,18 +2005,18 @@ export function Calendar({
             <ChevronRight size={16} />
           </button>
           {departments.length > 0 && (
-            <select
-              className="filter-select"
+            <ModernSelect
+              ariaLabel={t("filter.department")}
               value={department}
-              onChange={(event) => setDepartment(event.target.value)}
-            >
-              <option value="All">{t("admin.allDepartments")}</option>
-              {departments.map((item) => (
-                <option key={item.id} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+              onChange={setDepartment}
+              options={[
+                { value: "All", label: t("admin.allDepartments") },
+                ...departments.map((item) => ({
+                  value: item.name,
+                  label: item.name,
+                })),
+              ]}
+            />
           )}
           <span className="calendar-legend">
             <i className="legend-leave" />
@@ -1958,111 +2133,239 @@ function dayAwayChips(
   return [...leaveChips, ...authzChips];
 }
 
+const LEAVE_KIND_LABEL: Record<LeaveKind, MessageKey> = {
+  annual: "leaveType.annual",
+  sick: "leaveType.sick",
+  unpaid: "leaveType.unpaid",
+  other: "admin.leaveOther",
+};
+
+function AnalyticsBarList({
+  rows,
+  empty,
+}: {
+  rows: { name: string; days: number }[];
+  empty: string;
+}) {
+  const { dateLocale } = useLanguage();
+  const max = Math.max(...rows.map((row) => row.days), 0);
+  if (max === 0) return <div className="table-empty">{empty}</div>;
+  return (
+    <ul className="analytics-bars">
+      {rows.map((row) => (
+        <li key={row.name}>
+          <div>
+            <span>{row.name}</span>
+            <b>{formatLeaveDayCount(row.days, dateLocale)}</b>
+          </div>
+          <i>
+            <em style={{ width: `${Math.max(4, (row.days / max) * 100)}%` }} />
+          </i>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AnalyticsPeopleList({
+  people,
+  empty,
+  employees,
+  onOpenEmployee,
+}: {
+  people: { id: string; employeeId: string; name: string; type: string; startDate: string; endDate: string }[];
+  empty: string;
+  employees: Map<string, Employee>;
+  onOpenEmployee: (employee: Employee) => void;
+}) {
+  const { t, dateLocale } = useLanguage();
+  if (people.length === 0) return <div className="table-empty">{empty}</div>;
+  return (
+    <ul className="analytics-people">
+      {people.map((person) => (
+        <li key={person.id}>
+          <button
+            type="button"
+            onClick={() => {
+              const employee = employees.get(person.employeeId);
+              if (employee) onOpenEmployee(employee);
+            }}
+          >
+            <b>{person.name}</b>
+            <span>
+              {leaveTypeLabel(t, person.type)} ·{" "}
+              {formatDisplayDate(person.startDate, dateLocale)}
+              {person.startDate !== person.endDate
+                ? ` – ${formatDisplayDate(person.endDate, dateLocale)}`
+                : ""}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Analytics({
   requests,
   employees,
+  leaveTypes,
+  authorizations,
+  onOpenEmployee,
 }: {
   requests: LeaveRequest[];
   employees: Employee[];
+  leaveTypes: LeaveType[];
+  authorizations: Authorization[];
+  onOpenEmployee: (employee: Employee) => void;
 }) {
   const { t, dateLocale } = useLanguage();
-  const year = new Date().getFullYear();
-  const yearPrefix = String(year);
-  const thisYear = requests.filter((request) =>
-    request.startDate.startsWith(yearPrefix),
+  const today = isoDate();
+  const currentYear = Number(today.slice(0, 4));
+  const years = useMemo(
+    () =>
+      analyticsYearOptions(
+        [
+          ...requests.flatMap((request) => [request.startDate, request.endDate]),
+          ...authorizations.map((row) => row.date),
+        ],
+        currentYear,
+      ),
+    [requests, authorizations, currentYear],
   );
-  const approved = thisYear.filter((request) => request.status === "Approved");
-  const decided = thisYear.filter((request) => request.status !== "Pending");
-  const daysTaken = approved.reduce(
-    (total, request) =>
-      total + requestedLeaveDays(request.startDate, request.endDate),
-    0,
+  const [year, setYear] = useState(currentYear);
+  const snapshot = useMemo(
+    () =>
+      buildLeaveAnalytics({
+        year,
+        today,
+        requests,
+        employees,
+        leaveTypes,
+        authorizations,
+      }),
+    [year, today, requests, employees, leaveTypes, authorizations],
   );
-  const entitlement = employees
-    .filter((employee) => employee.status === "Active")
-    .reduce((total, employee) => {
-      const monthly = employee.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS;
-      return total + monthly * 12;
-    }, 0);
-  const utilization =
-    entitlement > 0 ? Math.round((daysTaken / entitlement) * 100) : 0;
-  const average =
-    approved.length > 0 ? daysTaken / approved.length : 0;
-  const approvalRate =
-    decided.length > 0
-      ? Math.round((approved.length / decided.length) * 100)
-      : 0;
-  const pending = requests.filter(
-    (request) => request.status === "Pending",
-  ).length;
-  const monthDays = Array.from({ length: 12 }, (_, index) => {
-    const month = `${yearPrefix}-${String(index + 1).padStart(2, "0")}`;
-    return approved
-      .filter((request) => request.startDate.startsWith(month))
-      .reduce(
-        (total, request) =>
-          total + requestedLeaveDays(request.startDate, request.endDate),
-        0,
-      );
-  });
-  const maxMonth = Math.max(...monthDays, 1);
+  const maxMonth = Math.max(...snapshot.monthDays, 1);
   const monthNames = Array.from({ length: 12 }, (_, index) =>
     new Date(year, index, 1).toLocaleDateString(dateLocale, { month: "short" }),
   );
+  const employeeById = useMemo(
+    () => new Map(employees.map((employee) => [employee.id, employee])),
+    [employees],
+  );
 
   return (
-    <>
+    <div className="analytics-page">
       <Header
         eyebrow={t("admin.insights")}
         title={screenLabel(t, "Analytics")}
-        action={null}
+        action={
+          <label className="analytics-year">
+            {t("admin.analyticsYear")}
+            <ModernSelect
+              ariaLabel={t("admin.analyticsYear")}
+              value={String(year)}
+              onChange={(value) => setYear(Number(value))}
+              options={years.map((option) => ({
+                value: String(option),
+                label: String(option),
+              }))}
+            />
+          </label>
+        }
       />
       <div className="metric-grid">
         <Metric
           label={t("admin.utilization")}
-          value={`${utilization}%`}
+          value={`${snapshot.utilization}%`}
           note={t("admin.utilizationNote", {
-            taken: daysTaken,
-            entitled: Math.round(entitlement),
+            taken: formatLeaveDayCount(snapshot.annualDaysTaken, dateLocale),
+            entitled: formatLeaveDayCount(snapshot.entitlement, dateLocale),
           })}
           tone="indigo"
           icon={<Activity size={19} />}
         />
         <Metric
           label={t("admin.average")}
-          value={approved.length === 0 ? "0d" : `${average.toFixed(1)}d`}
-          note={t("admin.averageNote", { count: approved.length })}
+          value={
+            snapshot.approvedCount === 0
+              ? `0${t("panel.daysShort")}`
+              : `${snapshot.averageDays.toFixed(1)}${t("panel.daysShort")}`
+          }
+          note={t("admin.averageNote", { count: snapshot.approvedCount })}
           tone="teal"
           icon={<Clock3 size={19} />}
         />
         <Metric
           label={t("admin.approvalRate")}
-          value={`${approvalRate}%`}
+          value={`${snapshot.approvalRate}%`}
           note={t("admin.approvalRateNote", {
-            approved: approved.length,
-            decided: decided.length,
+            approved: snapshot.approvedCount,
+            decided: snapshot.decidedCount,
           })}
           tone="amber"
           icon={<Check size={19} />}
         />
         <Metric
           label={t("admin.pendingApprovals")}
-          value={String(pending)}
+          value={String(snapshot.pendingCount)}
           note={t("admin.openRequests")}
           tone="rose"
           icon={<Activity size={19} />}
         />
+      </div>
+      <div className="metric-grid analytics-metrics-secondary">
+        <Metric
+          label={t("admin.authorizations")}
+          value={`${formatLeaveDayCount(snapshot.authorizationHours, dateLocale)} h`}
+          note={t("admin.authorizationNote", {
+            hours: formatLeaveDayCount(snapshot.authorizationHours, dateLocale),
+            days: formatLeaveDayCount(snapshot.authorizationDays, dateLocale),
+          })}
+          tone="teal"
+          icon={<Clock3 size={19} />}
+        />
+      </div>
+      <div className="analytics-grid">
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.byType")}</h2>
+            <span>{year}</span>
+          </div>
+          <AnalyticsBarList
+            rows={snapshot.byKind.map((row) => ({
+              name: t(LEAVE_KIND_LABEL[row.kind]),
+              days: row.days,
+            }))}
+            empty={t("admin.noApproved")}
+          />
+        </div>
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.byDepartment")}</h2>
+            <span>{year}</span>
+          </div>
+          <AnalyticsBarList
+            rows={snapshot.byDepartment.map((row) => ({
+              name:
+                row.name === "Unassigned" ? t("department.unassigned") : row.name,
+              days: row.days,
+            }))}
+            empty={t("admin.noDepartmentDays")}
+          />
+        </div>
       </div>
       <div className="card chart-card">
         <div className="card-heading">
           <h2>{t("admin.daysByMonth")}</h2>
           <span>{year}</span>
         </div>
-        {daysTaken === 0 ? (
+        {snapshot.daysTaken === 0 ? (
           <div className="table-empty">{t("admin.noApproved")}</div>
         ) : (
           <div className="month-chart" role="img" aria-label={t("admin.daysByMonth")}>
-            {monthDays.map((days, index) => (
+            {snapshot.monthDays.map((days, index) => (
               <div
                 key={`${year}-${index}`}
                 title={`${monthNames[index]}: ${formatDaysLabel(t, days)}`}
@@ -2077,7 +2380,33 @@ function Analytics({
           </div>
         )}
       </div>
-    </>
+      <div className="analytics-grid">
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.onLeaveNow")}</h2>
+            <span>{snapshot.onLeave.length}</span>
+          </div>
+          <AnalyticsPeopleList
+            people={snapshot.onLeave}
+            empty={t("admin.noOneOnLeave")}
+            onOpenEmployee={onOpenEmployee}
+            employees={employeeById}
+          />
+        </div>
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.upcomingLeave")}</h2>
+            <span>{snapshot.upcoming.length}</span>
+          </div>
+          <AnalyticsPeopleList
+            people={snapshot.upcoming}
+            empty={t("admin.noUpcoming")}
+            onOpenEmployee={onOpenEmployee}
+            employees={employeeById}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2095,14 +2424,43 @@ function SettingsView({
   const t = useT();
   const [tab, setTab] = useState("Company Profile");
   const settingsTabs = [
-    { id: "Company Profile", label: t("admin.companyProfile") },
-    { id: "Leave Policy", label: t("admin.leavePolicy") },
-    { id: "Attendance", label: t("nav.attendance") },
-    { id: "Departments", label: screenLabel(t, "Departments") },
-    { id: "Roles & Permissions", label: t("admin.roles") },
+    {
+      id: "Company Profile",
+      label: t("admin.companyProfile"),
+      hint: t("admin.companyHint"),
+      intro: t("admin.companyIntro"),
+      icon: Building2,
+    },
+    {
+      id: "Leave Policy",
+      label: t("admin.leavePolicy"),
+      hint: t("admin.leaveHint"),
+      intro: t("admin.leaveIntro"),
+      icon: Palmtree,
+    },
+    {
+      id: "Attendance",
+      label: t("nav.attendance"),
+      hint: t("admin.attendanceHint"),
+      intro: t("admin.attendanceIntro"),
+      icon: Clock3,
+    },
+    {
+      id: "Departments",
+      label: screenLabel(t, "Departments"),
+      hint: t("admin.departmentsHint"),
+      intro: t("admin.departmentsIntro"),
+      icon: Users,
+    },
+    {
+      id: "Roles & Permissions",
+      label: t("admin.roles"),
+      hint: t("admin.rolesHint"),
+      intro: t("admin.rolesIntro"),
+      icon: ShieldCheck,
+    },
   ];
-  const tabLabel =
-    settingsTabs.find((item) => item.id === tab)?.label ?? tab;
+  const current = settingsTabs.find((item) => item.id === tab) ?? settingsTabs[0];
 
   return (
     <>
@@ -2112,71 +2470,101 @@ function SettingsView({
         action={null}
       />
       <div className="card settings-card">
-        <nav className="settings-nav">
-          {settingsTabs.map((item) => (
-            <button
-              className={tab === item.id ? "active" : ""}
-              key={item.id}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <nav className="settings-nav" aria-label={screenLabel(t, "Settings")}>
+          {settingsTabs.map((item) => {
+            const Icon = item.icon;
+            const selected = tab === item.id;
+            return (
+              <button
+                className={selected ? "active" : ""}
+                key={item.id}
+                type="button"
+                aria-current={selected ? "page" : undefined}
+                onClick={() => setTab(item.id)}
+              >
+                <Icon size={16} />
+                <span>
+                  {item.label}
+                  <small>{item.hint}</small>
+                </span>
+              </button>
+            );
+          })}
         </nav>
         <div className="settings-form">
-          <p className="eyebrow">{t("admin.configuration")}</p>
-          <h2>{tabLabel}</h2>
+          <div className="settings-panel-head">
+            <h2>{current.label}</h2>
+            <p>{current.intro}</p>
+          </div>
           {tab === "Company Profile" && (
-            <>
-              <Field label={t("admin.companyName")} value="Kachabiti" readOnly />
-              <p className="page-subtitle">{t("admin.brandingFixed")}</p>
-            </>
+            <div className="settings-identity">
+              <span className="settings-identity-mark" aria-hidden="true">
+                K
+              </span>
+              <div>
+                <p className="eyebrow">{t("admin.companyName")}</p>
+                <h3>Kachabiti</h3>
+                <p>{t("admin.brandingFixed")}</p>
+              </div>
+            </div>
           )}
           {tab === "Leave Policy" &&
             (leaveTypes.length === 0 ? (
-              <p className="page-subtitle">{t("admin.noLeaveTypes")}</p>
+              <p className="settings-empty">{t("admin.noLeaveTypes")}</p>
             ) : (
-              leaveTypes.map((type) => (
-                <Field
-                  key={type.id}
-                  label={leaveTypeLabel(t, type.name)}
-                  value={t("admin.policyDays", { days: type.defaultDays })}
-                  readOnly
-                />
-              ))
+              <ul className="settings-list">
+                {leaveTypes.map((type) => (
+                  <li key={type.id}>
+                    <b>{leaveTypeLabel(t, type.name)}</b>
+                    <em>{t("admin.policyDays", { days: type.defaultDays })}</em>
+                  </li>
+                ))}
+              </ul>
             ))}
           {tab === "Attendance" && (
             <AttendanceScheduleSettings employees={employees} flash={flash} />
           )}
-          {tab === "Roles & Permissions" &&
-            [
-              t("admin.roleAdmin"),
-              t("admin.roleManager"),
-              t("admin.roleEmployee"),
-            ].map((item) => (
-              <div className="permission-row" key={item}>
-                <ShieldCheck size={16} />
-                {item}
-              </div>
-            ))}
+          {tab === "Roles & Permissions" && (
+            <div className="settings-roles">
+              {(
+                [
+                  ["admin.roleAdminTitle", "admin.roleAdminBody"],
+                  ["admin.roleManagerTitle", "admin.roleManagerBody"],
+                  ["admin.roleEmployeeTitle", "admin.roleEmployeeBody"],
+                ] as const
+              ).map(([title, body]) => (
+                <article className="settings-role" key={title}>
+                  <ShieldCheck size={16} />
+                  <div>
+                    <h3>{t(title)}</h3>
+                    <p>{t(body)}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
           {tab === "Departments" &&
             (departments.length === 0 ? (
-              <p className="page-subtitle">{t("admin.noDepartments")}</p>
+              <p className="settings-empty">{t("admin.noDepartments")}</p>
             ) : (
-              departments.map((department) => (
-                <Field
-                  key={department.id}
-                  label={department.name}
-                  value={t("admin.deptRow", {
-                    count: department.count,
-                    manager:
-                      department.manager === "Unassigned"
-                        ? t("department.unassigned")
-                        : department.manager,
-                  })}
-                  readOnly
-                />
-              ))
+              <ul className="settings-list">
+                {departments.map((department) => (
+                  <li key={department.id}>
+                    <div>
+                      <b>{department.name}</b>
+                      <span>
+                        {t("admin.managedBy", {
+                          manager:
+                            department.manager === "Unassigned"
+                              ? t("department.unassigned")
+                              : department.manager,
+                        })}
+                      </span>
+                    </div>
+                    <em>{t("admin.deptPeople", { count: department.count })}</em>
+                  </li>
+                ))}
+              </ul>
             ))}
         </div>
       </div>

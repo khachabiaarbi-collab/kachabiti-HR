@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Select } from "@base-ui/react/select";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { Employee } from "@/lib/app-types";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
 import {
@@ -168,18 +169,26 @@ export function Button({
   onClick,
   secondary = false,
   type,
+  disabled = false,
+  busy = false,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   secondary?: boolean;
   type?: "button" | "submit";
+  disabled?: boolean;
+  /** Shows a spinner and blocks clicks while an action runs. */
+  busy?: boolean;
 }) {
   return (
     <button
       type={type}
-      className={secondary ? "secondary-button" : "primary-button"}
+      className={`${secondary ? "secondary-button" : "primary-button"}${busy ? " is-busy" : ""}`}
       onClick={onClick}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
     >
+      {busy && <span className="button-spinner" aria-hidden="true" />}
       {children}
     </button>
   );
@@ -195,6 +204,9 @@ export function Field({
   min,
   max,
   readOnly = false,
+  required = false,
+  hint,
+  error,
 }: {
   label: string;
   type?: string;
@@ -205,11 +217,27 @@ export function Field({
   min?: string;
   max?: string;
   readOnly?: boolean;
+  required?: boolean;
+  /** Helper text under the input. */
+  hint?: string;
+  /** Validation message; replaces the hint and marks the input invalid. */
+  error?: string | null;
 }) {
+  const caption = error ? (
+    <span className="field-error" role="alert">{error}</span>
+  ) : hint ? (
+    <span className="field-hint">{hint}</span>
+  ) : null;
+  const heading = (
+    <span className="form-label-text">
+      {label}
+      {required && <span className="field-required" aria-hidden="true"> *</span>}
+    </span>
+  );
   if (type === "date") {
     return (
-      <label className="form-label">
-        {label}
+      <label className={`form-label${error ? " has-error" : ""}`}>
+        {heading}
         <DatePicker
           name={name}
           value={onChange || readOnly ? value : undefined}
@@ -218,13 +246,14 @@ export function Field({
           readOnly={readOnly}
           onChange={onChange}
         />
+        {caption}
       </label>
     );
   }
 
   return (
-    <label className="form-label">
-      {label}
+    <label className={`form-label${error ? " has-error" : ""}${readOnly ? " is-readonly" : ""}`}>
+      {heading}
       <input
         type={type}
         name={name}
@@ -233,12 +262,15 @@ export function Field({
         max={max}
         autoComplete="off"
         readOnly={readOnly}
+        required={required}
+        aria-invalid={error ? true : undefined}
         {...(onChange
           ? { value: value ?? "", onChange: (e) => onChange(e.target.value) }
           : readOnly
             ? { value: value ?? "" }
             : { defaultValue: value })}
       />
+      {caption}
     </label>
   );
 }
@@ -297,6 +329,103 @@ export function Header({
   );
 }
 
+/** The People-tab dropdown: a button trigger and a checkmarked list. */
+export function ModernSelect({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+  disabled = false,
+  block = false,
+  active = false,
+  prefix,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  ariaLabel?: string;
+  disabled?: boolean;
+  /** Fill the parent field instead of staying a compact filter. */
+  block?: boolean;
+  /** Filled trigger, used when a table filter is narrowed. */
+  active?: boolean;
+  prefix?: string;
+}) {
+  return (
+    <Select.Root
+      items={options}
+      value={value}
+      modal={false}
+      disabled={disabled}
+      onValueChange={(next) => {
+        if (typeof next === "string") onChange(next);
+      }}
+    >
+      <Select.Trigger
+        className={`modern-select${active ? " is-active" : ""}${block ? " is-block" : ""}`}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      >
+        {prefix && <span className="modern-select-prefix">{prefix}</span>}
+        <Select.Value className="modern-select-value" />
+        <Select.Icon className="modern-select-icon">
+          <ChevronDown size={14} />
+        </Select.Icon>
+      </Select.Trigger>
+      <Select.Portal>
+        <Select.Positioner
+          className="modern-select-positioner"
+          sideOffset={6}
+          align="start"
+          alignItemWithTrigger={false}
+        >
+          <Select.Popup className="modern-select-popup">
+            <Select.List className="modern-select-list">
+              {options.map((option, index) => (
+                <Select.Item
+                  key={`${option.value}-${index}`}
+                  value={option.value}
+                  className="modern-select-item"
+                >
+                  <Select.ItemText>{option.label}</Select.ItemText>
+                  <Select.ItemIndicator className="modern-select-check">
+                    <Check size={14} />
+                  </Select.ItemIndicator>
+                </Select.Item>
+              ))}
+            </Select.List>
+          </Select.Popup>
+        </Select.Positioner>
+      </Select.Portal>
+    </Select.Root>
+  );
+}
+
+/** Dropdown used by the table filters; "All" is the cleared state. */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  const active = value !== "All";
+  return (
+    <ModernSelect
+      value={value}
+      onChange={onChange}
+      options={options}
+      ariaLabel={label}
+      active={active}
+      prefix={active ? label : undefined}
+    />
+  );
+}
+
 export function FilterBar({
   search,
   setSearch,
@@ -314,6 +443,7 @@ export function FilterBar({
     setValue: (value: string) => void;
     options: string[];
     label?: string;
+    optionLabel?: (option: string) => string;
   }[];
   startDate?: string;
   setStartDate?: (value: string) => void;
@@ -339,21 +469,20 @@ export function FilterBar({
         />
       </div>
       {filters.map((filter, index) => (
-        <select
+        <FilterSelect
           key={index}
-          className="filter-select"
-          aria-label={filterLabel(filter.label)}
+          label={filterLabel(filter.label)}
           value={filter.value}
-          onChange={(e) => filter.setValue(e.target.value)}
-        >
-          {filter.options.map((option) => (
-            <option key={option} value={option}>
-              {filter.label === "Leave type" && option !== "All"
+          onChange={filter.setValue}
+          options={filter.options.map((option) => ({
+            value: option,
+            label: filter.optionLabel
+              ? filter.optionLabel(option)
+              : filter.label === "Leave type" && option !== "All"
                 ? leaveTypeLabel(t, option)
-                : filterOptionLabel(t, option)}
-            </option>
-          ))}
-        </select>
+                : filterOptionLabel(t, option),
+          }))}
+        />
       ))}
       {setStartDate && setEndDate && (
         <DateRangePicker

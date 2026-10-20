@@ -364,17 +364,21 @@ export function TopActions({
       <div
         ref={searchRef}
         className={`global-search ${showSearch || globalSearch ? "expanded" : ""}`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          const target = event.target;
+          if (target instanceof Element && target.closest(".search-results")) return;
+          setShowAccount(false);
+          setShowNotices(false);
+          setShowSearch(true);
+          searchInputRef.current?.focus();
+        }}
       >
         <button
           type="button"
           className="global-search-trigger"
           aria-label={t("search.aria")}
           aria-expanded={showSearch}
-          onClick={() => {
-            setShowAccount(false);
-            setShowNotices(false);
-            setShowSearch(true);
-          }}
         >
           <Search size={16} />
         </button>

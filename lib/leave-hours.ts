@@ -268,9 +268,13 @@ export function vacationBalanceDays(input: {
   );
 }
 
-export function formatLeaveDayCount(value: number, locale: string) {
+export function formatLeaveDayCount(
+  value: number,
+  locale: string,
+  maximumFractionDigits = 3,
+) {
   return value.toLocaleString(locale, {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    maximumFractionDigits,
   });
 }

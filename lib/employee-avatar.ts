@@ -2,17 +2,16 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  AVATAR_MAX_BYTES,
+  AVATAR_TYPES,
+  avatarFileIssue,
+  avatarStoragePath,
+  canChangeEmployeePhoto,
+  resolveAvatarEmployeeId,
+} from "@/lib/employee-avatar-file";
 
 const BUCKET = "avatars";
-const MAX_BYTES = 5 * 1024 * 1024;
-const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
-
-function extensionFor(type: string) {
-  if (type === "image/png") return "png";
-  if (type === "image/webp") return "webp";
-  if (type === "image/gif") return "gif";
-  return "jpg";
-}
 
 async function ensureAvatarsBucket(
   admin: ReturnType<typeof createAdminClient>,
@@ -23,8 +22,8 @@ async function ensureAvatarsBucket(
   if (!existing) {
     const { error } = await admin.storage.createBucket(BUCKET, {
       public: true,
-      fileSizeLimit: MAX_BYTES,
-      allowedMimeTypes: [...ALLOWED],
+      fileSizeLimit: AVATAR_MAX_BYTES,
+      allowedMimeTypes: [...AVATAR_TYPES],
     });
     if (error && !/exist/i.test(error.message)) throw error;
     return;
@@ -32,8 +31,8 @@ async function ensureAvatarsBucket(
   if (!existing.public) {
     const { error } = await admin.storage.updateBucket(BUCKET, {
       public: true,
-      fileSizeLimit: MAX_BYTES,
-      allowedMimeTypes: [...ALLOWED],
+      fileSizeLimit: AVATAR_MAX_BYTES,
+      allowedMimeTypes: [...AVATAR_TYPES],
     });
     if (error) throw error;
   }
@@ -49,17 +48,37 @@ export async function uploadEmployeeAvatar(formData: FormData) {
   }
 
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: "Choose a photo to upload", url: null };
-  }
-  if (!ALLOWED.includes(file.type as (typeof ALLOWED)[number])) {
-    return { error: "Use a JPG, PNG, WEBP, or GIF photo", url: null };
-  }
-  if (file.size > MAX_BYTES) {
-    return { error: "Photo must be 5 MB or smaller", url: null };
+  const fileIssue = avatarFileIssue(
+    file instanceof File ? { type: file.type, size: file.size } : null,
+  );
+  if (fileIssue || !(file instanceof File)) {
+    return { error: fileIssue ?? "Choose a photo to upload", url: null };
   }
 
-  const path = `${user.id}/avatar.${extensionFor(file.type)}`;
+  const targetId = resolveAvatarEmployeeId(
+    String(formData.get("employeeId") ?? ""),
+    user.id,
+  );
+  if (!targetId) {
+    return { error: "Employee not found", url: null };
+  }
+
+  const { data: me } = await supabase
+    .from("employees")
+    .select("role, status")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (
+    !me ||
+    !canChangeEmployeePhoto(
+      { id: user.id, role: String(me.role), status: String(me.status) },
+      targetId,
+    )
+  ) {
+    return { error: "You cannot change this photo", url: null };
+  }
+
+  const path = avatarStoragePath(targetId, file.type);
 
   try {
     const admin = createAdminClient();
@@ -77,7 +96,7 @@ export async function uploadEmployeeAvatar(formData: FormData) {
     const { error: updateError } = await admin
       .from("employees")
       .update({ avatar_url: url })
-      .eq("id", user.id);
+      .eq("id", targetId);
     if (updateError) return { error: updateError.message, url: null };
     return { error: null, url };
   } catch (error) {
