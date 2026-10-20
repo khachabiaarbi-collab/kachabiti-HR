@@ -5468,6 +5468,10 @@ select option {
   color: #047857;
   background: #ecfdf5;
 }
+.credited-cell .is-authz {
+  color: #3730a3;
+  background: #eef2ff;
+}
 .credited-cell.is-empty {
   color: #94a3b8;
 }

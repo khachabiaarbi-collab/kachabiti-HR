@@ -78,6 +78,9 @@ export type PayVariables = {
   outsideHours?: number;
   unpaidHours?: number;
   notYetHours?: number;
+  /** Approved paid leave hours (shown as their own line, included in pay). */
+  paidLeaveHours?: number;
+  holidayHours?: number;
 };
 
 export type PayLineKind = "earning" | "deduction" | "contribution" | "employer";
@@ -118,6 +121,8 @@ export const PAY_LABELS = {
   outside: "Prorata entrée / sortie",
   absentDays: "Retenue absences non justifiées",
   remaining: "Période du mois non encore travaillée",
+  paidLeave: "Congé payé",
+  holiday: "Jours fériés",
   absenceHours: "Retenue heures non travaillées",
   absence: "Retenue absences",
   overtime: "Heures supplémentaires",
@@ -196,18 +201,43 @@ export function calculatePayslip(
         : 0;
 
   // Earnings
+  const leaveHours = clockMode ? v(variables.paidLeaveHours) : 0;
+  const holidayHours = clockMode ? v(variables.holidayHours) : 0;
+  const leavePay = round3(hourly * leaveHours);
+  const holidayPay = round3(hourly * holidayHours);
   const baseAmount =
     contract.payBasis === "hourly"
       ? hourly * v(variables.workedHours)
       : contract.baseSalary;
+  const shownBase = clockMode ? Math.max(0, round3(baseAmount - leavePay - holidayPay)) : baseAmount;
   lines.push(
-    line("base", PAY_LABELS.base, "earning", baseAmount, {
+    line("base", PAY_LABELS.base, "earning", shownBase, {
       base: contract.payBasis === "hourly" ? variables.workedHours : clockMode ? hours : null,
       rate: contract.payBasis === "hourly" || clockMode ? round3(hourly) : null,
       subjectToCnss: true,
       taxable: true,
     }),
   );
+  if (leavePay > 0) {
+    lines.push(
+      line("paidLeave", PAY_LABELS.paidLeave, "earning", leavePay, {
+        base: leaveHours,
+        rate: round3(hourly),
+        subjectToCnss: true,
+        taxable: true,
+      }),
+    );
+  }
+  if (holidayPay > 0) {
+    lines.push(
+      line("holiday", PAY_LABELS.holiday, "earning", holidayPay, {
+        base: holidayHours,
+        rate: round3(hourly),
+        subjectToCnss: true,
+        taxable: true,
+      }),
+    );
+  }
 
   if (clockMode) {
     // Paid per hour against the month's schedule; deductions cannot exceed the base.
@@ -563,6 +593,12 @@ export type ClockMonth = {
   scheduledHours: number;
   /** Worked (quarter-hour rules), authorized, public holidays and paid leave. */
   creditedHours: number;
+  /** Approved paid leave (included in creditedHours). */
+  paidLeaveHours: number;
+  /** Public holidays (included in creditedHours). */
+  holidayHours: number;
+  /** Credited from the time clock only (not leave or holidays). */
+  punchedHours: number;
   /** Before the hire date or after the contract end. */
   outsideHours: number;
   unpaidHours: number;
@@ -589,7 +625,18 @@ export function summarizeClockMonth(
     now?: string | null;
   },
 ): ClockMonth {
-  const minutes = { scheduled: 0, credited: 0, outside: 0, unpaid: 0, absence: 0, notYet: 0, overtime: 0 };
+  const minutes = {
+    scheduled: 0,
+    credited: 0,
+    punched: 0,
+    paidLeave: 0,
+    holiday: 0,
+    outside: 0,
+    unpaid: 0,
+    absence: 0,
+    notYet: 0,
+    overtime: 0,
+  };
   let lateCount = 0;
   let earlyLeaveCount = 0;
   let absentDays = 0;
@@ -611,8 +658,14 @@ export function summarizeClockMonth(
       continue;
     }
     const leave = options.leave.get(day.date);
-    if (options.holidays.has(day.date) || leave === false) {
+    if (options.holidays.has(day.date)) {
       minutes.credited += scheduled;
+      minutes.holiday += scheduled;
+      continue;
+    }
+    if (leave === false) {
+      minutes.credited += scheduled;
+      minutes.paidLeave += scheduled;
       continue;
     }
     if (leave === true) {
@@ -636,6 +689,7 @@ export function summarizeClockMonth(
         };
     const credited = Math.min(scheduled, credit.creditedMinutes);
     minutes.credited += credited;
+    minutes.punched += credited;
     minutes.overtime += credit.overtimeMinutes;
     lateCount += credit.lateCount;
     // Today is not over: leaving "early" cannot be judged yet.
@@ -652,6 +706,9 @@ export function summarizeClockMonth(
   return {
     scheduledHours: hours(minutes.scheduled),
     creditedHours: hours(minutes.credited),
+    paidLeaveHours: hours(minutes.paidLeave),
+    holidayHours: hours(minutes.holiday),
+    punchedHours: hours(minutes.punched),
     outsideHours: hours(minutes.outside),
     unpaidHours: hours(minutes.unpaid),
     absenceHours: hours(minutes.absence),
@@ -906,6 +963,25 @@ function roundedSessions(
       return [[clockMinutes(entry), clockMinutes(exit)]];
     }),
   );
+}
+
+/** Minutes of authorization that fall inside the day's work window (first start → last end). */
+export function scheduledAuthorizationMinutes(
+  segments: TimeWindow[],
+  authorizations: TimeWindow[],
+): number {
+  const schedule = segments
+    .map(({ start, end }): [number, number] => [clockMinutes(start), clockMinutes(end)])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0]);
+  if (!schedule.length || !authorizations.length) return 0;
+  const covered = mergeIntervals(
+    authorizations.map(({ start, end }): [number, number] => [
+      clockMinutes(start),
+      clockMinutes(end),
+    ]),
+  );
+  return overlap(covered, [schedule[0][0], schedule[schedule.length - 1][1]]);
 }
 
 /**

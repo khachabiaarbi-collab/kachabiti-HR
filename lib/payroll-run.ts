@@ -773,6 +773,8 @@ export async function prepareRun(
               absenceHours: clock!.absenceHours,
               notYetHours: clock!.notYetHours,
               overtimeHours: clock!.overtimeHours,
+              paidLeaveHours: clock!.paidLeaveHours,
+              holidayHours: clock!.holidayHours,
             }
           : {
               workedHours,

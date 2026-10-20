@@ -34,7 +34,12 @@ import {
 
 import { Header, Metric, ModernSelect } from "@/components/primitives";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
-import { creditDay, explicitBreakMinutes, type DayCredit } from "@/lib/payroll-calc";
+import {
+  creditDay,
+  explicitBreakMinutes,
+  scheduledAuthorizationMinutes,
+  type DayCredit,
+} from "@/lib/payroll-calc";
 import {
   cloneSegment,
   insertAfter,
@@ -187,22 +192,39 @@ function breakMinutesFromSchedule(segments: { kind: string; startTime: string; e
   return breaks.length ? explicitBreakMinutes(breaks) : null;
 }
 
-function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
-  const segments = item.scheduleSegments
+function workWindows(item: AttendanceDaySummary) {
+  return item.scheduleSegments
     .filter((segment) => segment.kind === "work")
     .map((segment) => ({ start: segment.startTime.slice(0, 5), end: segment.endTime.slice(0, 5) }));
+}
+
+function authorizationWindows(item: AttendanceDaySummary) {
+  return item.authorizations.map((authorization) => ({
+    start: authorization.startTime.slice(0, 5),
+    end: authorization.endTime.slice(0, 5),
+  }));
+}
+
+function creditedForDay(item: AttendanceDaySummary): DayCredit | null {
+  const segments = workWindows(item);
   if (!segments.length) return null;
   const today = localIsoDate();
   const sessions = item.sessions.map((session) => ({
     in: tunisClock.format(new Date(session.entryAt)),
     out: session.exitAt ? tunisClock.format(new Date(session.exitAt)) : null,
   }));
-  const authorizations = item.authorizations.map((authorization) => ({
-    start: authorization.startTime.slice(0, 5),
-    end: authorization.endTime.slice(0, 5),
-  }));
   const now = item.workDate === today ? tunisClock.format(new Date()) : null;
-  return creditDay(segments, sessions, authorizations, now, breakMinutesFromSchedule(item.scheduleSegments));
+  return creditDay(
+    segments,
+    sessions,
+    authorizationWindows(item),
+    now,
+    breakMinutesFromSchedule(item.scheduleSegments),
+  );
+}
+
+function authorizationMinutesForDay(item: AttendanceDaySummary) {
+  return scheduledAuthorizationMinutes(workWindows(item), authorizationWindows(item));
 }
 
 function datetimeLocalValue(value: string) {
@@ -1564,7 +1586,11 @@ function AttendanceRecordDetail({
         ) : (
           item.authorizations.map((authorization) => (
             <span key={authorization.id}>
-              <b>{authorization.startTime.slice(0, 5)}–{authorization.endTime.slice(0, 5)}</b>
+              <b>
+                {authorization.startTime.slice(0, 5)}–{authorization.endTime.slice(0, 5)}
+                {" · "}
+                {formatAttendanceDuration(authorization.durationMinutes)}
+              </b>
               {authorization.reason}
             </span>
           ))
@@ -2674,11 +2700,22 @@ function CreditedCell({ item }: { item: AttendanceReportItem }) {
   const t = useT();
   const credit = creditedForDay(item);
   if (!credit) return <span className="credited-cell is-empty">{t("common.dash")}</span>;
+  const authorizationMinutes = authorizationMinutesForDay(item);
+  const showMarks =
+    credit.lateCount > 0 ||
+    credit.earlyLeaveCount > 0 ||
+    credit.overtimeMinutes > 0 ||
+    authorizationMinutes > 0;
   return (
     <span className="credited-cell" title={t("att.creditedHint")}>
       <b>{formatAttendanceDuration(credit.creditedMinutes)}</b>
-      {(credit.lateCount > 0 || credit.earlyLeaveCount > 0 || credit.overtimeMinutes > 0) && (
+      {showMarks && (
         <small>
+          {authorizationMinutes > 0 && (
+            <em className="is-authz">
+              {t("att.badgeAuthz", { hours: formatAttendanceDuration(authorizationMinutes) })}
+            </em>
+          )}
           {credit.lateCount > 0 && <em className="is-late">{t("att.badgeLate")}</em>}
           {credit.earlyLeaveCount > 0 && <em className="is-early">{t("att.badgeEarly")}</em>}
           {credit.overtimeMinutes > 0 && (
@@ -2694,8 +2731,12 @@ function CreditedCell({ item }: { item: AttendanceReportItem }) {
 function CountedTodayMetric({ attendance }: { attendance: AttendanceDaySummary }) {
   const t = useT();
   const credit = creditedForDay(attendance);
+  const authorizationMinutes = authorizationMinutesForDay(attendance);
   const marks = credit
     ? [
+        authorizationMinutes > 0
+          ? t("att.badgeAuthz", { hours: formatAttendanceDuration(authorizationMinutes) })
+          : "",
         credit.lateCount > 0 ? t("att.badgeLate") : "",
         credit.earlyLeaveCount > 0 && attendance.state !== "present" ? t("att.badgeEarly") : "",
         credit.overtimeMinutes > 0 ? `+${formatAttendanceDuration(credit.overtimeMinutes)} ${t("att.overtimeShort")}` : "",

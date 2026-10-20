@@ -8,6 +8,7 @@ import {
   calculatePayslip,
   progressiveTax,
   creditDay,
+  scheduledAuthorizationMinutes,
   round3,
   summarizeAttendance,
   workingDaysInRange,
@@ -446,6 +447,18 @@ test("discipline: no overtime when the day was not complete", () => {
   assert.equal(day.lateCount, 1);
 });
 
+test("scheduledAuthorizationMinutes: afternoon slot is 4 h inside the day", () => {
+  assert.equal(
+    scheduledAuthorizationMinutes(weekday, [{ start: "13:00", end: "17:00" }]),
+    240,
+  );
+  assert.equal(scheduledAuthorizationMinutes(weekday, []), 0);
+  assert.equal(
+    scheduledAuthorizationMinutes(weekday, [{ start: "17:00", end: "18:00" }]),
+    0,
+  );
+});
+
 test("discipline: authorization 08:00–09:00 and arrival at 09:00 loses nothing", () => {
   assert.equal(
     creditDay(weekday, [{ in: "09:00", out: "17:00" }], [{ start: "08:00", end: "09:00" }]).creditedMinutes,
@@ -599,6 +612,8 @@ test("clock month: the five parts add up to the scheduled hours", () => {
   });
   assert.equal(month.scheduledHours, 8 * 6 + 5.5);
   assert.equal(month.creditedHours, 8 + 7.5 + 5.5 + 4);
+  assert.equal(month.paidLeaveHours, 0);
+  assert.equal(month.punchedHours, 8 + 7.5 + 5.5 + 4);
   assert.equal(month.absenceHours, 0.5 + 8);
   assert.equal(month.unpaidHours, 8);
   assert.equal(month.notYetHours, 4 + 8);
@@ -606,6 +621,27 @@ test("clock month: the five parts add up to the scheduled hours", () => {
   assert.equal(month.lateCount, 1);
   assert.equal(month.earlyLeaveCount, 1);
   assert.equal(month.absentDays, 1);
+  assert.equal(
+    round3(month.creditedHours + month.outsideHours + month.unpaidHours + month.absenceHours + month.notYetHours),
+    month.scheduledHours,
+  );
+});
+
+test("clock month: approved paid leave is paid and listed apart from punches", () => {
+  const month = summarizeClockMonth(
+    [clockDay("2026-10-05", []), clockDay("2026-10-06", [{ in: "08:00", out: "17:00" }])],
+    {
+      employedFrom: null,
+      employedTo: null,
+      holidays: new Set(),
+      leave: new Map([["2026-10-05", false]]),
+      today: "2026-10-06",
+    },
+  );
+  assert.equal(month.paidLeaveHours, 8);
+  assert.equal(month.punchedHours, 8);
+  assert.equal(month.creditedHours, 16);
+  assert.equal(month.absentDays, 0);
   assert.equal(
     round3(month.creditedHours + month.outsideHours + month.unpaidHours + month.absenceHours + month.notYetHours),
     month.scheduledHours,
@@ -625,6 +661,30 @@ test("clock pay: salary per scheduled hour, deductions and overtime at 125 %", (
   assert.equal(byCode.absence, -5);
   assert.equal(byCode.overtime, 6.25);
   assert.equal(result.gross, 1001.25);
+});
+
+test("clock pay: paid leave is its own line and does not change the gross", () => {
+  const result = calculatePayslip(monthly(1000), rates2026, {
+    ...noVariables,
+    scheduledHours: 200,
+    paidLeaveHours: 8,
+  });
+  const byCode = Object.fromEntries(result.lines.map((line) => [line.code, line.amount]));
+  assert.equal(byCode.paidLeave, 40);
+  assert.equal(byCode.base, 960);
+  assert.equal(result.gross, 1000);
+});
+
+test("clock pay: a public holiday is listed apart from the base", () => {
+  const result = calculatePayslip(monthly(1000), rates2026, {
+    ...noVariables,
+    scheduledHours: 200,
+    holidayHours: 8,
+  });
+  const byCode = Object.fromEntries(result.lines.map((line) => [line.code, line.amount]));
+  assert.equal(byCode.holiday, 40);
+  assert.equal(byCode.base, 960);
+  assert.equal(result.gross, 1000);
 });
 
 test("clock pay: Takwa (SIVP) paid only her credited hours so far", () => {

@@ -1225,6 +1225,8 @@ function PayslipPanel({
       outsideHours: String(current.outsideHours ?? 0),
       unpaidHours: String(current.unpaidHours ?? 0),
       notYetHours: String(current.notYetHours ?? 0),
+      paidLeaveHours: String(current.paidLeaveHours ?? 0),
+      holidayHours: String(current.holidayHours ?? 0),
     };
   });
   const [oneOff, setOneOff] = useState<PayItem[]>(inputs.oneOff);
@@ -1314,6 +1316,11 @@ function PayslipPanel({
             {inputs.attendance.clock && (
               <dl className="payslip-clock">
                 <div><dt>{t("payroll.clockScheduled")}</dt><dd>{inputs.attendance.clock.scheduledHours.toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockPunched")}</dt><dd>{(inputs.attendance.clock.punchedHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                <div><dt>{t("payroll.clockPaidLeave")}</dt><dd>{(inputs.attendance.clock.paidLeaveHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                {(inputs.attendance.clock.holidayHours ?? 0) > 0 && (
+                  <div><dt>{t("payroll.clockHoliday")}</dt><dd>{(inputs.attendance.clock.holidayHours ?? 0).toLocaleString(dateLocale)} h</dd></div>
+                )}
                 <div><dt>{t("payroll.clockCredited")}</dt><dd>{inputs.attendance.clock.creditedHours.toLocaleString(dateLocale)} h</dd></div>
                 <div><dt>{t("payroll.clockAbsence")}</dt><dd className={inputs.attendance.clock.absenceHours ? "is-negative" : undefined}>{inputs.attendance.clock.absenceHours.toLocaleString(dateLocale)} h</dd></div>
                 {inputs.attendance.clock.notYetHours > 0 && (
