@@ -910,14 +910,13 @@ export async function loadCompany(): Promise<PayrollCompany> {
   const { data, error } = await createClient()
     .from("payroll_company")
     .select("name, address, tax_id, cnss_employer_number")
-    .eq("id", 1)
     .maybeSingle();
   if (error) throw new Error(error.message);
   const row = data as
     | { name: string; address: string | null; tax_id: string | null; cnss_employer_number: string | null }
     | null;
   return {
-    name: row?.name ?? "Kachabiti",
+    name: row?.name ?? "",
     address: row?.address ?? null,
     taxId: row?.tax_id ?? null,
     cnssEmployerNumber: row?.cnss_employer_number ?? null,
@@ -925,15 +924,21 @@ export async function loadCompany(): Promise<PayrollCompany> {
 }
 
 export async function saveCompany(company: PayrollCompany) {
+  const name = company.name.trim();
+  if (!name) throw new Error("Employer name is required");
+  // One row per company: RLS limits it to the signed-in admin's company,
+  // which the column default fills in on the first save.
   const { error } = await createClient()
     .from("payroll_company")
-    .update({
-      name: company.name.trim() || "Kachabiti",
-      address: company.address?.trim() || null,
-      tax_id: company.taxId?.trim() || null,
-      cnss_employer_number: company.cnssEmployerNumber?.trim() || null,
-    })
-    .eq("id", 1);
+    .upsert(
+      {
+        name,
+        address: company.address?.trim() || null,
+        tax_id: company.taxId?.trim() || null,
+        cnss_employer_number: company.cnssEmployerNumber?.trim() || null,
+      },
+      { onConflict: "organization_id" },
+    );
   if (error) throw new Error(error.message);
 }
 

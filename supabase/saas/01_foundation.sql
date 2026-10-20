@@ -15,9 +15,9 @@
 --   * the new-user trigger: invited users join the inviter's company, a
 --     self sign-up with a company name creates a new company.
 --
--- Not covered yet (SaaS step 2): attendance, authorizations, payroll and
--- notification tables still have no company column. Do not put two real
--- companies in the same database before step 2.
+-- Attendance, authorizations, payroll, notifications and leave attachments
+-- are limited to the company by their own scripts (SaaS step 2), which need
+-- this one to have run first.
 
 -- ---------------------------------------------------------------------------
 -- Companies
@@ -263,9 +263,27 @@ as $$
   );
 $$;
 
+-- This employee belongs to the signed-in user's company. Used by the RLS of
+-- tables that hang off an employee (punches, authorizations, payslips, …)
+-- and by security definer functions before they act on an employee.
+create or replace function public.is_my_org_employee(target_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.employees
+    where id = target_id
+      and organization_id = public.current_org_id()
+  );
+$$;
+
 grant execute on function public.current_org_id() to authenticated;
 grant execute on function public.is_org_staff() to authenticated;
 grant execute on function public.is_org_admin() to authenticated;
+grant execute on function public.is_my_org_employee(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Filling in and protecting the company column

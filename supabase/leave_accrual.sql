@@ -6,6 +6,15 @@
 --   deducted on approval) + days earned from credited hours since the hire
 --   date - approved authorization time that was not worked.
 -- Earned days per month = credited hours ÷ scheduled hours × the month's rate.
+-- Needs supabase/saas/01_foundation.sql: staff only read their own company.
+
+do $$
+begin
+  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Rate history: a change applies from the current month on; past months keep
@@ -64,14 +73,15 @@ revoke insert, update, delete on public.leave_rate_changes from authenticated;
 drop policy if exists "leave_rate_changes_read" on public.leave_rate_changes;
 create policy "leave_rate_changes_read" on public.leave_rate_changes
 for select to authenticated using (
-  employee_id = auth.uid() or public.attendance_is_staff()
+  employee_id = auth.uid()
+  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
 );
 
 -- ---------------------------------------------------------------------------
 -- Time-clock windows per employee and day (Tunis local "HH24:MI"): the
 -- schedule's work segments, the punch sessions and approved authorizations.
--- An employee reads their own; admin and manager read anyone, or everyone
--- when p_employee_id is null.
+-- An employee reads their own; admin and manager read anyone of their
+-- company, or all of it when p_employee_id is null.
 -- ---------------------------------------------------------------------------
 
 drop function if exists public.attendance_credit_windows(uuid, date, date);
@@ -104,7 +114,12 @@ begin
   if auth.uid() is null then
     raise exception using message = 'UNAUTHENTICATED';
   end if;
-  if (p_employee_id is null or p_employee_id <> auth.uid()) and not public.attendance_is_staff() then
+  if (p_employee_id is null or p_employee_id <> auth.uid())
+    and not (
+      public.attendance_is_staff()
+      and (p_employee_id is null or public.is_my_org_employee(p_employee_id))
+    )
+  then
     raise exception using message = 'FORBIDDEN';
   end if;
   if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 400 then
@@ -114,6 +129,7 @@ begin
   for person in
     select employee.id from public.employees employee
     where (p_employee_id is null or employee.id = p_employee_id)
+      and employee.organization_id = public.current_org_id()
       and coalesce(employee.status, 'active') <> 'inactive'
   loop
     for day in select generate_series(p_from, p_to, interval '1 day')::date loop

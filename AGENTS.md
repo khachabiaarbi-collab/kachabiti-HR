@@ -60,9 +60,12 @@ Import clients from `@/lib/supabase/client` (Client Components) and `@/lib/supab
 RHFlow, the multi-company version, is built step by step; the plan, the
 current state and the `rhflow-dev` setup are in [`SAAS.md`](SAAS.md). On a
 company database run [`supabase/saas/01_foundation.sql`](supabase/saas/01_foundation.sql)
-first and never `handle_new_user.sql` or `leave_types.sql`. Server actions
+first and never `handle_new_user.sql`, `leave_types.sql` or
+`employee_solde.sql`; on this branch the feature scripts (attendance,
+payroll, …) require it and are limited to the company. Server actions
 that use the service role must check the target with `sameCompanyEmployee`
-(`lib/org-access.ts`).
+(`lib/org-access.ts`). New SQL must scope by company: `current_org_id()`
+for company rows, `is_my_org_employee()` for rows tied to an employee.
 
 ## Auth
 

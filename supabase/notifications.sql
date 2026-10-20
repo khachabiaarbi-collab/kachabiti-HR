@@ -1,6 +1,15 @@
 -- Run in the SQL editor. In-app bell notices for leave requests,
 -- authorizations, and attendance corrections (submit / approve / reject),
--- one row per recipient.
+-- one row per recipient. Needs supabase/saas/01_foundation.sql: staff are
+-- only told about requests from their own company.
+
+do $$
+begin
+  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
 
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
@@ -128,6 +137,10 @@ begin
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
     where employee.role in ('admin', 'manager')
+      and employee.organization_id = (
+        select requester.organization_id from public.employees as requester
+        where requester.id = new.employee_id
+      )
       and employee.id is distinct from new.employee_id
       and coalesce(employee.status, 'active') <> 'inactive';
 
@@ -175,6 +188,10 @@ begin
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
     where employee.role in ('admin', 'manager')
+      and employee.organization_id = (
+        select requester.organization_id from public.employees as requester
+        where requester.id = new.employee_id
+      )
       and employee.id is distinct from new.employee_id
       and coalesce(employee.status, 'active') <> 'inactive';
 

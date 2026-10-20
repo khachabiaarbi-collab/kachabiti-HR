@@ -9,8 +9,8 @@ production.
 | Step | Scope | State |
 |---|---|---|
 | 1 | Companies, company on core tables, RLS, new-user trigger | **done** |
-| 2 | Company on attendance, authorizations, payroll, notifications, storage | next |
-| 3 | Per-company settings: name, logo, colors, CNSS / tax id, timezone, leave and payroll rules | |
+| 2 | Company on attendance, authorizations, payroll, notifications, storage | **done** |
+| 3 | Per-company settings: name, logo, colors, CNSS / tax id, timezone, leave and payroll rules | next |
 | 4 | Roles and permissions per company (owner, admin, HR, manager, employee) | |
 | 5 | Sign-up "Create my company", setup wizard, employee import | |
 | 6 | KAN super-admin console (customers, suspend, usage) | |
@@ -59,9 +59,53 @@ company (`sameCompanyEmployee` in [`lib/org-access.ts`](lib/org-access.ts)):
 invites, account email / password, leave balances, photos, deletions and
 leave attachments. Invites put the new employee in the inviter's company.
 
-Not isolated yet (step 2): attendance, authorizations, payroll, notifications
-and the storage buckets. **Do not put two real companies in one database
-before step 2.**
+## Step 2: what exists
+
+The feature scripts in `supabase/` are company-aware and stop with an error
+until `01_foundation.sql` has run. Re-running any of them is still safe.
+
+- **Company rows.** `organization_id` (filled with the user's company) on
+  `attendance_settings` (one row per company instead of one for the whole
+  database), `work_schedules` (one default per company), `work_locations`,
+  `pay_components` (codes unique per company), `payroll_settings` (one row per
+  company and year), `payroll_runs` (one per company and month),
+  `payroll_company` (employer details, one row per company) and
+  `payroll_audit_log`.
+- **Employee rows.** Punches, corrections, schedule assignments, the
+  attendance audit, authorizations, leave rate changes, contracts, employee
+  pay components, payslips and payslip lines follow their employee's company
+  (`is_my_org_employee()` in `01_foundation.sql`); no extra column.
+- **Functions** that bypass RLS (`attendance_report`, `attendance_day_summary`,
+  `apply_attendance_correction`, `save_work_schedule`,
+  `attendance_credit_windows`, `payroll_attendance_month`, …) only reach the
+  caller's company. Settings and the default schedule are looked up by the
+  employee's company.
+- **New companies** get attendance settings, a default work week
+  (Mon–Fri 08:00–17:00 with a 12:00 break, Saturday 08:00–13:30), the usual
+  pay components, employer details with the company name and **unverified**
+  2026 rates: each company's accountant verifies its own rates.
+- **Notifications** only reach staff of the requester's company.
+- **Leave attachments** (storage): a person reads and uploads only in their
+  own folder; staff read their company's.
+- **Migration.** Rows created before companies go to the oldest company.
+  Payroll rows get their company without firing triggers, so verified rates
+  stay verified and paid months stay locked. An untouched `Kachabiti`
+  employer row takes the company name.
+- App: employer details are saved per company (`saveCompany` in
+  `lib/payroll-run.ts`); a blank employer name is refused.
+- `employee_solde.sql` (one-off balance fix) now refuses to run on a company
+  database: it would rewrite every company's balances.
+- The Saturday migration of the old default schedule was removed from
+  `attendance.sql`; on a re-run it would have overwritten every company's
+  Saturday hours. New companies get Saturday in their default week.
+
+Still open (later steps):
+
+- Avatars are in a public bucket: a photo URL works for anyone who has it
+  (the path is the employee id).
+- The UI still says "Kachabiti" (titles, logo, payslip fallback): step 3.
+- Yearly payroll rates are copied per company; a shared, centrally verified
+  set could replace them later.
 
 ## Setting up `rhflow-dev`
 
@@ -79,9 +123,13 @@ before step 2.**
    Do **not** run `handle_new_user.sql` or `leave_types.sql`: they are for
    single-company databases and now stop with an error on a company
    database.
-2. Run `supabase/saas/tests/01_isolation.sql`. It must end with
-   `All isolation checks passed`. It runs in a transaction that is rolled
-   back, so it leaves nothing behind.
+   On a project set up before step 2, run the same list again in the same
+   order: the scripts migrate what is there.
+2. Run `supabase/saas/tests/01_isolation.sql`, then
+   `supabase/saas/tests/02_isolation.sql`. They must end with
+   `All isolation checks passed` and `All step 2 isolation checks passed`.
+   Each runs in a transaction that is rolled back, so it leaves nothing
+   behind.
 3. Authentication → Users → Add user (email + password, auto-confirm), then
    in the SQL editor:
    ```sql
@@ -97,5 +145,8 @@ before step 2.**
 
 `01_foundation.sql` also migrates an existing single-company database: all
 current rows go to one company named `Kachabiti` (constant
-`existing_company` in the script). Only do this after step 2 is ready and
-tested, with a backup, and run the isolation test afterwards.
+`existing_company` in the script). With a backup, run the whole list from
+"Setting up `rhflow-dev`" step 1 in order (the feature scripts move
+attendance and payroll data to that company), then both isolation tests.
+Deploy the app from this branch at the same time: it saves employer details
+per company.

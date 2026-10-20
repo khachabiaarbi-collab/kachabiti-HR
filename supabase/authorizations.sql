@@ -1,5 +1,15 @@
 -- Run once in the Supabase SQL editor so hour-based authorizations
 -- live in their own table (not leave_requests).
+-- Needs supabase/saas/01_foundation.sql: every rule is limited to the
+-- employee's company.
+
+do $$
+begin
+  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
 
 create table if not exists public.authorizations (
   id uuid primary key default gen_random_uuid(),
@@ -31,18 +41,14 @@ drop policy if exists "authorizations_select_own_or_staff" on public.authorizati
 drop policy if exists "authorizations_insert_own_pending" on public.authorizations;
 drop policy if exists "authorizations_update_staff" on public.authorizations;
 
--- Employees read their own rows; admin/manager read all.
+-- Employees read their own rows; admin/manager read their company's.
 create policy "authorizations_select_own_or_staff"
 on public.authorizations
 for select
 to authenticated
 using (
   employee_id = auth.uid()
-  or exists (
-    select 1 from public.employees
-    where id = auth.uid()
-      and role in ('admin', 'manager')
-  )
+  or (public.is_org_staff() and public.is_my_org_employee(employee_id))
 );
 
 -- Employees open their own pending requests only.
@@ -56,22 +62,10 @@ with check (
   and approver_id is null
 );
 
--- Staff approve or reject.
+-- Staff approve or reject within their company.
 create policy "authorizations_update_staff"
 on public.authorizations
 for update
 to authenticated
-using (
-  exists (
-    select 1 from public.employees
-    where id = auth.uid()
-      and role in ('admin', 'manager')
-  )
-)
-with check (
-  exists (
-    select 1 from public.employees
-    where id = auth.uid()
-      and role in ('admin', 'manager')
-  )
-);
+using (public.is_org_staff() and public.is_my_org_employee(employee_id))
+with check (public.is_org_staff() and public.is_my_org_employee(employee_id));

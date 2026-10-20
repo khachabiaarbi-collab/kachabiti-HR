@@ -1,5 +1,5 @@
 -- Work sites used to restrict employee punches to the office (GPS).
--- Run after supabase/attendance.sql.
+-- Run after supabase/attendance.sql. Each company has its own sites.
 
 create table if not exists public.work_locations (
   id uuid primary key default gen_random_uuid(),
@@ -11,6 +11,16 @@ create table if not exists public.work_locations (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Sites from before companies go to the oldest company.
+alter table public.work_locations
+  add column if not exists organization_id uuid references public.organizations (id) on delete cascade;
+update public.work_locations
+set organization_id = (select id from public.organizations order by created_at limit 1)
+where organization_id is null;
+alter table public.work_locations alter column organization_id set default public.current_org_id();
+alter table public.work_locations alter column organization_id set not null;
+create index if not exists work_locations_organization_idx on public.work_locations (organization_id);
 
 alter table public.attendance_punches
   add column if not exists latitude double precision,
@@ -33,9 +43,10 @@ alter table public.work_locations enable row level security;
 
 drop policy if exists "work_locations_read" on public.work_locations;
 create policy "work_locations_read" on public.work_locations
-for select to authenticated using (true);
+for select to authenticated using (organization_id = public.current_org_id());
 
 drop policy if exists "work_locations_staff_write" on public.work_locations;
 create policy "work_locations_staff_write" on public.work_locations
-for all to authenticated using (public.attendance_is_staff())
-with check (public.attendance_is_staff());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.is_org_staff())
+with check (organization_id = public.current_org_id() and public.is_org_staff());

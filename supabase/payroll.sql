@@ -4,6 +4,56 @@
 -- Access: salary data is visible to active admins only. Managers do not see
 -- contracts or payslips. Employees read their own payslips once the month is
 -- validated. Amounts are in TND with 3 decimals (millimes).
+--
+-- Needs supabase/saas/01_foundation.sql: rates, pay components, runs and
+-- employer details belong to a company, and admins only see their own.
+
+do $$
+begin
+  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
+
+-- Adds organization_id to a payroll table created before companies. The
+-- existing rows go to the oldest company through the column default, so no
+-- row trigger fires (an UPDATE would un-verify rates and hit the locks on
+-- paid months). Rows that cannot belong to any company are removed.
+create or replace function public.payroll_add_company_column(p_table regclass)
+returns boolean
+language plpgsql
+set search_path = ''
+as $$
+declare
+  oldest uuid := (select id from public.organizations order by created_at limit 1);
+begin
+  if exists (
+    select 1 from pg_attribute
+    where attrelid = p_table and attname = 'organization_id' and not attisdropped
+  ) then
+    return false;
+  end if;
+  if oldest is null then
+    execute format('alter table %s disable trigger user', p_table);
+    execute format('delete from %s', p_table);
+    execute format('alter table %s enable trigger user', p_table);
+    execute format(
+      'alter table %s add column organization_id uuid not null references public.organizations (id) on delete cascade',
+      p_table);
+  else
+    execute format(
+      'alter table %s add column organization_id uuid not null default %L references public.organizations (id) on delete cascade',
+      p_table, oldest);
+  end if;
+  execute format('alter table %s alter column organization_id set default public.current_org_id()', p_table);
+  execute format('create index if not exists %s on %s (organization_id)',
+    replace(p_table::text, 'public.', '') || '_organization_idx', p_table);
+  return true;
+end;
+$$;
+
+revoke all on function public.payroll_add_company_column(regclass) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -89,7 +139,9 @@ for each row execute function public.payroll_touch_updated_at();
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.payroll_settings (
-  year integer primary key check (year between 2020 and 2100),
+  organization_id uuid not null default public.current_org_id()
+    references public.organizations (id) on delete cascade,
+  year integer not null check (year between 2020 and 2100),
   cnss_employee_rate numeric(6, 4) not null,
   cnss_employer_rate numeric(6, 4) not null,
   work_accident_rate numeric(6, 4) not null default 0,
@@ -106,8 +158,19 @@ create table if not exists public.payroll_settings (
   verified_by uuid references public.employees (id) on delete set null,
   verified_at timestamptz,
   updated_at timestamptz not null default now(),
-  constraint payroll_settings_brackets_array check (jsonb_typeof(irpp_brackets) = 'array')
+  constraint payroll_settings_brackets_array check (jsonb_typeof(irpp_brackets) = 'array'),
+  primary key (organization_id, year)
 );
+
+-- Before companies: one row per year for the whole database.
+do $$
+begin
+  if public.payroll_add_company_column('public.payroll_settings') then
+    alter table public.payroll_settings drop constraint payroll_settings_pkey;
+    alter table public.payroll_settings add primary key (organization_id, year);
+  end if;
+end;
+$$;
 
 drop trigger if exists payroll_settings_touch on public.payroll_settings;
 create trigger payroll_settings_touch
@@ -147,36 +210,15 @@ create trigger payroll_settings_verify
 before insert or update on public.payroll_settings
 for each row execute function public.payroll_settings_verify();
 
--- Starting values for 2026. NOT VERIFIED: an accountant must confirm every
--- rate (CNSS régime, accident rate for the sector, IRPP brackets, CSS,
--- deductions) in Settings → Payroll before the first month is validated.
-insert into public.payroll_settings (
-  year, cnss_employee_rate, cnss_employer_rate, work_accident_rate, css_rate,
-  irpp_brackets, professional_expenses_rate, professional_expenses_cap,
-  head_of_family_deduction, child_deduction, max_children, overtime_rate
-) values (
-  2026, 0.0918, 0.1657, 0, 0.005,
-  '[
-    {"up_to": 5000,  "rate": 0},
-    {"up_to": 10000, "rate": 0.15},
-    {"up_to": 20000, "rate": 0.25},
-    {"up_to": 30000, "rate": 0.30},
-    {"up_to": 40000, "rate": 0.33},
-    {"up_to": 50000, "rate": 0.36},
-    {"up_to": 70000, "rate": 0.38},
-    {"up_to": null,  "rate": 0.40}
-  ]'::jsonb,
-  0.10, 2000, 300, 100, 4, 1.25
-)
-on conflict (year) do nothing;
-
 -- ---------------------------------------------------------------------------
 -- Pay components (primes, indemnités, retenues)
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.pay_components (
   id uuid primary key default gen_random_uuid(),
-  code text not null unique check (code ~ '^[a-z0-9_]+$'),
+  organization_id uuid not null default public.current_org_id()
+    references public.organizations (id) on delete cascade,
+  code text not null check (code ~ '^[a-z0-9_]+$'),
   name text not null check (char_length(trim(name)) > 0),
   kind text not null check (kind in ('earning', 'deduction')),
   subject_to_cnss boolean not null default true,
@@ -186,14 +228,12 @@ create table if not exists public.pay_components (
   created_at timestamptz not null default now()
 );
 
-insert into public.pay_components (code, name, kind, subject_to_cnss, taxable)
-values
-  ('transport', 'Prime de transport', 'earning', true, true),
-  ('presence', 'Prime de présence', 'earning', true, true),
-  ('panier', 'Prime de panier', 'earning', true, true),
-  ('advance', 'Avance sur salaire', 'deduction', false, false),
-  ('loan', 'Remboursement de prêt', 'deduction', false, false)
-on conflict (code) do nothing;
+select public.payroll_add_company_column('public.pay_components');
+
+-- Codes are unique per company.
+alter table public.pay_components drop constraint if exists pay_components_code_key;
+create unique index if not exists pay_components_org_code_key
+  on public.pay_components (organization_id, code);
 
 create table if not exists public.employee_pay_components (
   id uuid primary key default gen_random_uuid(),
@@ -215,7 +255,9 @@ create index if not exists employee_pay_components_employee_idx
 
 create table if not exists public.payroll_runs (
   id uuid primary key default gen_random_uuid(),
-  period date not null unique check (extract(day from period) = 1),
+  organization_id uuid not null default public.current_org_id()
+    references public.organizations (id) on delete cascade,
+  period date not null check (extract(day from period) = 1),
   status text not null default 'draft'
     check (status in ('draft', 'validated', 'paid')),
   settings_snapshot jsonb,
@@ -226,6 +268,12 @@ create table if not exists public.payroll_runs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- One run per company and month.
+select public.payroll_add_company_column('public.payroll_runs');
+alter table public.payroll_runs drop constraint if exists payroll_runs_period_key;
+create unique index if not exists payroll_runs_org_period_key
+  on public.payroll_runs (organization_id, period);
 
 -- Bypasses RLS so payslip policies can check the run without recursing.
 create or replace function public.payroll_run_published(target_run uuid)
@@ -328,7 +376,8 @@ begin
     end if;
     if not exists (
       select 1 from public.payroll_settings
-      where year = extract(year from new.period)::integer and verified
+      where organization_id = new.organization_id
+        and year = extract(year from new.period)::integer and verified
     ) then
       raise exception 'Payroll rates for % are not verified', extract(year from new.period);
     end if;
@@ -398,6 +447,21 @@ create table if not exists public.payroll_audit_log (
   created_at timestamptz not null default clock_timestamp()
 );
 
+-- Company of the audited row; rows from before companies are matched to
+-- their employee or row company, else the oldest company.
+alter table public.payroll_audit_log
+  add column if not exists organization_id uuid references public.organizations (id) on delete cascade;
+update public.payroll_audit_log as audit
+set organization_id = coalesce(
+  (coalesce(audit.new_data, audit.old_data) ->> 'organization_id')::uuid,
+  (select employee.organization_id from public.employees employee
+   where employee.id::text = coalesce(audit.new_data, audit.old_data) ->> 'employee_id'),
+  (select id from public.organizations order by created_at limit 1)
+)
+where audit.organization_id is null;
+create index if not exists payroll_audit_log_organization_idx
+  on public.payroll_audit_log (organization_id, created_at desc);
+
 create index if not exists payroll_audit_record_idx
   on public.payroll_audit_log (table_name, record_id, created_at desc);
 
@@ -410,8 +474,15 @@ as $$
 declare
   row_data jsonb := to_jsonb(coalesce(new, old));
 begin
-  insert into public.payroll_audit_log (actor_id, table_name, record_id, action, old_data, new_data)
+  insert into public.payroll_audit_log (
+    organization_id, actor_id, table_name, record_id, action, old_data, new_data
+  )
   values (
+    coalesce(
+      (row_data ->> 'organization_id')::uuid,
+      (select employee.organization_id from public.employees employee
+       where employee.id::text = row_data ->> 'employee_id')
+    ),
     auth.uid(),
     tg_table_name,
     coalesce(row_data ->> 'id', row_data ->> 'year'),
@@ -486,7 +557,8 @@ begin
 
   for person in
     select employee.id from public.employees employee
-    where coalesce(employee.status, 'active') <> 'inactive'
+    where employee.organization_id = public.current_org_id()
+      and coalesce(employee.status, 'active') <> 'inactive'
   loop
     for day in select generate_series(p_from, p_to, interval '1 day')::date loop
       schedule_value := public.attendance_resolved_schedule(person.id, day);
@@ -546,19 +618,39 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Employer details printed on every payslip (single row)
+-- Employer details printed on every payslip (one row per company)
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.payroll_company (
-  id integer primary key default 1 check (id = 1),
-  name text not null default 'Kachabiti',
+  organization_id uuid primary key default public.current_org_id()
+    references public.organizations (id) on delete cascade,
+  name text not null,
   address text,
   tax_id text,
   cnss_employer_number text,
   updated_at timestamptz not null default now()
 );
 
-insert into public.payroll_company (id) values (1) on conflict (id) do nothing;
+-- Before companies: a single row with id = 1.
+do $$
+begin
+  if public.payroll_add_company_column('public.payroll_company') then
+    alter table public.payroll_company drop constraint payroll_company_pkey;
+    alter table public.payroll_company drop column id;
+    alter table public.payroll_company add primary key (organization_id);
+    -- A row never edited still has the old default name.
+    update public.payroll_company as company
+    set name = organization.name
+    from public.organizations as organization
+    where organization.id = company.organization_id
+      and company.name = 'Kachabiti'
+      and company.address is null
+      and company.tax_id is null
+      and company.cnss_employer_number is null;
+  end if;
+  alter table public.payroll_company alter column name drop default;
+end;
+$$;
 
 drop trigger if exists payroll_company_touch on public.payroll_company;
 create trigger payroll_company_touch
@@ -597,6 +689,84 @@ after update of status on public.payroll_runs
 for each row execute function public.payroll_notify_validated();
 
 -- ---------------------------------------------------------------------------
+-- Starting payroll data for each company: employer details (company name),
+-- the usual pay components and the 2026 rates.
+--
+-- 2026 rates are NOT VERIFIED: an accountant must confirm every rate (CNSS
+-- régime, accident rate for the sector, IRPP brackets, CSS, deductions) in
+-- Payroll → Rates & bonuses before the first month is validated.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.payroll_seed_organization(p_org uuid)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.payroll_company (organization_id, name)
+  select id, name from public.organizations where id = p_org
+  on conflict (organization_id) do nothing;
+
+  insert into public.pay_components (organization_id, code, name, kind, subject_to_cnss, taxable)
+  values
+    (p_org, 'transport', 'Prime de transport', 'earning', true, true),
+    (p_org, 'presence', 'Prime de présence', 'earning', true, true),
+    (p_org, 'panier', 'Prime de panier', 'earning', true, true),
+    (p_org, 'advance', 'Avance sur salaire', 'deduction', false, false),
+    (p_org, 'loan', 'Remboursement de prêt', 'deduction', false, false)
+  on conflict (organization_id, code) do nothing;
+
+  insert into public.payroll_settings (
+    organization_id, year, cnss_employee_rate, cnss_employer_rate, work_accident_rate, css_rate,
+    irpp_brackets, professional_expenses_rate, professional_expenses_cap,
+    head_of_family_deduction, child_deduction, max_children, overtime_rate
+  ) values (
+    p_org, 2026, 0.0918, 0.1657, 0, 0.005,
+    '[
+      {"up_to": 5000,  "rate": 0},
+      {"up_to": 10000, "rate": 0.15},
+      {"up_to": 20000, "rate": 0.25},
+      {"up_to": 30000, "rate": 0.30},
+      {"up_to": 40000, "rate": 0.33},
+      {"up_to": 50000, "rate": 0.36},
+      {"up_to": 70000, "rate": 0.38},
+      {"up_to": null,  "rate": 0.40}
+    ]'::jsonb,
+    0.10, 2000, 300, 100, 4, 1.25
+  )
+  on conflict (organization_id, year) do nothing;
+$$;
+
+revoke all on function public.payroll_seed_organization(uuid) from public, anon, authenticated;
+
+create or replace function public.organizations_payroll_defaults()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.payroll_seed_organization(new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists organizations_payroll_defaults on public.organizations;
+create trigger organizations_payroll_defaults
+after insert on public.organizations
+for each row execute function public.organizations_payroll_defaults();
+
+do $$
+declare
+  org record;
+begin
+  for org in select id from public.organizations loop
+    perform public.payroll_seed_organization(org.id);
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Row level security
 -- ---------------------------------------------------------------------------
 
@@ -620,41 +790,63 @@ grant select, insert, update, delete on table
   public.payslip_lines
 to authenticated;
 grant select on table public.payroll_audit_log to authenticated;
-grant select, update on table public.payroll_company to authenticated;
+grant select, insert, update on table public.payroll_company to authenticated;
 revoke insert, update, delete on public.payroll_audit_log from authenticated;
 
 drop policy if exists "employee_contracts_admin" on public.employee_contracts;
 create policy "employee_contracts_admin" on public.employee_contracts
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (public.payroll_is_admin() and public.is_my_org_employee(employee_id))
+with check (public.payroll_is_admin() and public.is_my_org_employee(employee_id));
 
 drop policy if exists "payroll_settings_admin" on public.payroll_settings;
 create policy "payroll_settings_admin" on public.payroll_settings
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.payroll_is_admin())
+with check (organization_id = public.current_org_id() and public.payroll_is_admin());
 
 drop policy if exists "pay_components_admin" on public.pay_components;
 create policy "pay_components_admin" on public.pay_components
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.payroll_is_admin())
+with check (organization_id = public.current_org_id() and public.payroll_is_admin());
 
 drop policy if exists "employee_pay_components_admin" on public.employee_pay_components;
 create policy "employee_pay_components_admin" on public.employee_pay_components
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (public.payroll_is_admin() and public.is_my_org_employee(employee_id))
+with check (
+  public.payroll_is_admin()
+  and public.is_my_org_employee(employee_id)
+  and exists (
+    select 1 from public.pay_components component
+    where component.id = component_id
+      and component.organization_id = public.current_org_id()
+  )
+);
 
 drop policy if exists "payroll_runs_admin" on public.payroll_runs;
 create policy "payroll_runs_admin" on public.payroll_runs
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.payroll_is_admin())
+with check (organization_id = public.current_org_id() and public.payroll_is_admin());
 
 -- Employees never read runs directly; payslips carry their own period.
 drop policy if exists "payroll_runs_read_own_published" on public.payroll_runs;
 
 drop policy if exists "payslips_admin" on public.payslips;
 create policy "payslips_admin" on public.payslips
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (public.payroll_is_admin() and public.is_my_org_employee(employee_id))
+with check (
+  public.payroll_is_admin()
+  and public.is_my_org_employee(employee_id)
+  and exists (
+    select 1 from public.payroll_runs run
+    where run.id = run_id
+      and run.organization_id = public.current_org_id()
+  )
+);
 
 drop policy if exists "payslips_read_own_published" on public.payslips;
 create policy "payslips_read_own_published" on public.payslips
@@ -665,8 +857,23 @@ for select to authenticated using (
 
 drop policy if exists "payslip_lines_admin" on public.payslip_lines;
 create policy "payslip_lines_admin" on public.payslip_lines
-for all to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (
+  public.payroll_is_admin()
+  and exists (
+    select 1 from public.payslips payslip
+    where payslip.id = payslip_lines.payslip_id
+      and public.is_my_org_employee(payslip.employee_id)
+  )
+)
+with check (
+  public.payroll_is_admin()
+  and exists (
+    select 1 from public.payslips payslip
+    where payslip.id = payslip_lines.payslip_id
+      and public.is_my_org_employee(payslip.employee_id)
+  )
+);
 
 drop policy if exists "payslip_lines_read_own_published" on public.payslip_lines;
 create policy "payslip_lines_read_own_published" on public.payslip_lines
@@ -680,18 +887,20 @@ for select to authenticated using (
   )
 );
 
--- Everyone with a payslip needs the employer details printed on it.
+-- Everyone with a payslip needs their company's employer details.
 drop policy if exists "payroll_company_read" on public.payroll_company;
 create policy "payroll_company_read" on public.payroll_company
-for select to authenticated using (true);
+for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "payroll_company_admin_write" on public.payroll_company;
 create policy "payroll_company_admin_write" on public.payroll_company
-for update to authenticated using (public.payroll_is_admin())
-with check (public.payroll_is_admin());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.payroll_is_admin())
+with check (organization_id = public.current_org_id() and public.payroll_is_admin());
 
 drop policy if exists "payroll_audit_admin_read" on public.payroll_audit_log;
 create policy "payroll_audit_admin_read" on public.payroll_audit_log
-for select to authenticated using (public.payroll_is_admin());
+for select to authenticated
+using (organization_id = public.current_org_id() and public.payroll_is_admin());
 
 revoke all on function public.payroll_is_admin(uuid) from public;
 grant execute on function public.payroll_is_admin(uuid) to authenticated;

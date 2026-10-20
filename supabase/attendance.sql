@@ -1,10 +1,22 @@
 -- Run after authorizations.sql. Attendance uses server time and controlled RPCs;
 -- employees never write the punch ledger directly.
+-- Needs supabase/saas/01_foundation.sql: settings and schedules belong to a
+-- company, and staff only see and change their own company's attendance.
+
+do $$
+begin
+  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
 
 create extension if not exists btree_gist with schema extensions;
 
+-- One row per company.
 create table if not exists public.attendance_settings (
-  id boolean primary key default true check (id),
+  organization_id uuid primary key default public.current_org_id()
+    references public.organizations (id) on delete cascade,
   timezone text not null default 'Africa/Tunis',
   grace_minutes integer not null default 5 check (grace_minutes between 0 and 120),
   max_sessions integer not null default 5 check (max_sessions between 1 and 5),
@@ -26,9 +38,28 @@ begin
 end;
 $$;
 
-insert into public.attendance_settings (id)
-values (true)
-on conflict (id) do nothing;
+-- Before companies this table held one row for the whole database (id =
+-- true): it becomes the oldest company's row.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'attendance_settings' and column_name = 'id'
+  ) then
+    alter table public.attendance_settings
+      add column if not exists organization_id uuid references public.organizations (id) on delete cascade;
+    update public.attendance_settings
+    set organization_id = (select id from public.organizations order by created_at limit 1)
+    where organization_id is null;
+    delete from public.attendance_settings where organization_id is null;
+    alter table public.attendance_settings drop constraint if exists attendance_settings_pkey;
+    alter table public.attendance_settings drop column id;
+    alter table public.attendance_settings add primary key (organization_id);
+    alter table public.attendance_settings
+      alter column organization_id set default public.current_org_id();
+  end if;
+end;
+$$;
 
 create table if not exists public.work_schedules (
   id uuid primary key default gen_random_uuid(),
@@ -39,8 +70,20 @@ create table if not exists public.work_schedules (
   updated_at timestamptz not null default now()
 );
 
-create unique index if not exists work_schedules_one_default_idx
-  on public.work_schedules (is_default)
+-- Schedules from before companies go to the oldest company.
+alter table public.work_schedules
+  add column if not exists organization_id uuid references public.organizations (id) on delete cascade;
+update public.work_schedules
+set organization_id = (select id from public.organizations order by created_at limit 1)
+where organization_id is null;
+alter table public.work_schedules alter column organization_id set default public.current_org_id();
+alter table public.work_schedules alter column organization_id set not null;
+create index if not exists work_schedules_organization_idx on public.work_schedules (organization_id);
+
+-- One default schedule per company.
+drop index if exists public.work_schedules_one_default_idx;
+create unique index if not exists work_schedules_one_default_per_org_idx
+  on public.work_schedules (organization_id)
   where is_default;
 
 create table if not exists public.work_schedule_segments (
@@ -272,9 +315,10 @@ declare
   timezone_value text;
 begin
   if tg_op = 'INSERT' then
-    select timezone into timezone_value
-    from public.attendance_settings
-    where id;
+    select settings.timezone into timezone_value
+    from public.attendance_settings settings
+    join public.employees employee on employee.organization_id = settings.organization_id
+    where employee.id = new.employee_id;
     timezone_value := coalesce(timezone_value, 'Africa/Tunis');
 
     if new.proposed_occurred_at is not null
@@ -305,63 +349,77 @@ create trigger attendance_corrections_validate
 before insert or update on public.attendance_correction_requests
 for each row execute function public.attendance_validate_correction_request();
 
-do $$
+-- Settings row and default work week (Mon–Fri 08:00–17:00 with a 12:00
+-- break, Saturday 08:00–13:30) for a company that has none yet.
+create or replace function public.attendance_seed_organization(p_org uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
 declare
   default_schedule_id uuid;
 begin
-  select id into default_schedule_id
-  from public.work_schedules
-  where is_default
-  order by created_at
-  limit 1;
+  insert into public.attendance_settings (organization_id)
+  values (p_org)
+  on conflict (organization_id) do nothing;
 
-  if default_schedule_id is null then
-    insert into public.work_schedules (name, is_default)
-    values ('Default work week', true)
-    returning id into default_schedule_id;
-  end if;
-
-  if not exists (
-    select 1 from public.work_schedule_segments
-    where schedule_id = default_schedule_id
+  if exists (
+    select 1 from public.work_schedules
+    where organization_id = p_org and is_default
   ) then
-    insert into public.work_schedule_segments
-      (schedule_id, iso_weekday, kind, start_time, end_time, position)
-    select default_schedule_id, weekday, segment.kind, segment.start_time, segment.end_time, segment.position
-    from generate_series(1, 5) as weekday
-    cross join (
-      values
-        ('work', '08:00'::time, '12:00'::time, 1::smallint),
-        ('break', '12:00'::time, '13:00'::time, 2::smallint),
-        ('work', '13:00'::time, '17:00'::time, 3::smallint)
-    ) as segment(kind, start_time, end_time, position);
+    return;
   end if;
+
+  insert into public.work_schedules (organization_id, name, is_default)
+  values (p_org, 'Default work week', true)
+  returning id into default_schedule_id;
+
+  insert into public.work_schedule_segments
+    (schedule_id, iso_weekday, kind, start_time, end_time, position)
+  select default_schedule_id, weekday, segment.kind, segment.start_time, segment.end_time, segment.position
+  from generate_series(1, 5) as weekday
+  cross join (
+    values
+      ('work', '08:00'::time, '12:00'::time, 1::smallint),
+      ('break', '12:00'::time, '13:00'::time, 2::smallint),
+      ('work', '13:00'::time, '17:00'::time, 3::smallint)
+  ) as segment(kind, start_time, end_time, position);
+
+  insert into public.work_schedule_segments
+    (schedule_id, iso_weekday, kind, start_time, end_time, position)
+  values (default_schedule_id, 6, 'work', time '08:00', time '13:30', 1);
 end;
 $$;
 
--- Saturday 08:00–13:30 on the default week. Safe to re-run when weekdays already exist.
-insert into public.work_schedule_segments
-  (schedule_id, iso_weekday, kind, start_time, end_time, position)
-select schedule.id, 6, 'work', time '08:00', time '13:30', 1
-from public.work_schedules schedule
-where schedule.is_default
-  and not exists (
-    select 1
-    from public.work_schedule_segments segment
-    where segment.schedule_id = schedule.id
-      and segment.iso_weekday = 6
-      and segment.kind = 'work'
-  );
+revoke all on function public.attendance_seed_organization(uuid) from public, anon, authenticated;
 
-update public.work_schedule_segments segment
-set end_time = time '13:30'
-from public.work_schedules schedule
-where segment.schedule_id = schedule.id
-  and schedule.is_default
-  and segment.iso_weekday = 6
-  and segment.kind = 'work'
-  and segment.start_time = time '08:00'
-  and segment.end_time in (time '12:00', time '13:00');
+create or replace function public.organizations_attendance_defaults()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.attendance_seed_organization(new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists organizations_attendance_defaults on public.organizations;
+create trigger organizations_attendance_defaults
+after insert on public.organizations
+for each row execute function public.organizations_attendance_defaults();
+
+do $$
+declare
+  org record;
+begin
+  for org in select id from public.organizations loop
+    perform public.attendance_seed_organization(org.id);
+  end loop;
+end;
+$$;
 
 create or replace function public.attendance_resolved_schedule(
   p_employee_id uuid,
@@ -386,10 +444,12 @@ as $$
       limit 1
     ),
     (
-      select id
-      from public.work_schedules
-      where is_default and is_active
-      order by created_at
+      select schedule.id
+      from public.work_schedules schedule
+      join public.employees employee on employee.organization_id = schedule.organization_id
+      where employee.id = p_employee_id
+        and schedule.is_default and schedule.is_active
+      order by schedule.created_at
       limit 1
     )
   );
@@ -402,7 +462,7 @@ create or replace function public.attendance_day_paid_minutes(
 returns integer
 language sql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
   with work as (
@@ -435,7 +495,7 @@ create or replace function public.attendance_day_break_minutes(
 returns integer
 language sql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
   select coalesce(sum(extract(epoch from (segment.end_time - segment.start_time)) / 60), 0)::integer
@@ -480,12 +540,18 @@ declare
   is_working_day boolean := false;
 begin
   if auth.uid() is null
-    or (auth.uid() <> p_employee_id and not public.attendance_is_staff())
+    or (
+      auth.uid() <> p_employee_id
+      and not (public.attendance_is_staff() and public.is_my_org_employee(p_employee_id))
+    )
   then
     raise exception using message = 'FORBIDDEN';
   end if;
 
-  select * into settings_row from public.attendance_settings where id;
+  select settings.* into settings_row
+  from public.attendance_settings settings
+  join public.employees employee on employee.organization_id = settings.organization_id
+  where employee.id = p_employee_id;
   if not found then
     settings_row.timezone := 'Africa/Tunis';
     settings_row.grace_minutes := 5;
@@ -666,7 +732,7 @@ begin
   end if;
 
   select timezone, max_sessions into timezone_value, max_sessions_value
-  from public.attendance_settings where id;
+  from public.attendance_settings where organization_id = public.current_org_id();
   timezone_value := coalesce(timezone_value, 'Africa/Tunis');
   max_sessions_value := coalesce(max_sessions_value, 5);
   work_date_value := (now_value at time zone timezone_value)::date;
@@ -745,7 +811,8 @@ begin
     raise exception using message = 'FORBIDDEN';
   end if;
 
-  select timezone into timezone_value from public.attendance_settings where id;
+  select timezone into timezone_value
+  from public.attendance_settings where organization_id = public.current_org_id();
   timezone_value := coalesce(timezone_value, 'Africa/Tunis');
   today_value := (now_value at time zone timezone_value)::date;
 
@@ -803,7 +870,7 @@ begin
   from public.attendance_correction_requests
   where id = p_request_id
   for update;
-  if not found then
+  if not found or not public.is_my_org_employee(request_row.employee_id) then
     raise exception using message = 'CORRECTION_NOT_FOUND';
   end if;
   if request_row.status <> 'pending' then
@@ -980,6 +1047,7 @@ begin
     left join public.departments department on department.id = employee.department_id
     where punch.work_date between p_from and p_to
       and punch.voided_at is null
+      and employee.organization_id = public.current_org_id()
       and (p_employee_id is null or punch.employee_id = p_employee_id)
       and (p_department_id is null or employee.department_id = p_department_id)
     group by punch.employee_id, punch.work_date, employee.full_name,
@@ -1038,12 +1106,14 @@ begin
   make_default := coalesce((p_schedule->>'isDefault')::boolean, false);
 
   if make_default then
-    update public.work_schedules set is_default = false where is_default;
+    update public.work_schedules set is_default = false
+    where is_default and organization_id = public.current_org_id();
   end if;
 
   if schedule_id_value is null then
-    insert into public.work_schedules (name, is_default, is_active)
+    insert into public.work_schedules (organization_id, name, is_default, is_active)
     values (
+      public.current_org_id(),
       trim(p_schedule->>'name'),
       make_default,
       coalesce((p_schedule->>'isActive')::boolean, true)
@@ -1054,7 +1124,7 @@ begin
     set name = trim(p_schedule->>'name'),
         is_default = make_default,
         is_active = coalesce((p_schedule->>'isActive')::boolean, true)
-    where id = schedule_id_value;
+    where id = schedule_id_value and organization_id = public.current_org_id();
     if not found then
       raise exception using message = 'SCHEDULE_NOT_FOUND';
     end if;
@@ -1084,6 +1154,9 @@ begin
     where schedule_id = schedule_id_value;
     for assignment in select value from jsonb_array_elements(p_assignments)
     loop
+      if not public.is_my_org_employee((assignment->>'employeeId')::uuid) then
+        raise exception using message = 'INVALID_ASSIGNMENTS';
+      end if;
       insert into public.employee_schedule_assignments (
         employee_id, schedule_id, effective_from, effective_to
       )
@@ -1101,10 +1174,13 @@ begin
     set timezone = coalesce(nullif(trim(p_settings->>'timezone'), ''), timezone),
         grace_minutes = coalesce((p_settings->>'graceMinutes')::integer, grace_minutes),
         max_sessions = coalesce((p_settings->>'maxSessions')::integer, max_sessions)
-    where id;
+    where organization_id = public.current_org_id();
   end if;
 
-  if not exists (select 1 from public.work_schedules where is_default) then
+  if not exists (
+    select 1 from public.work_schedules
+    where is_default and organization_id = public.current_org_id()
+  ) then
     raise exception using message = 'DEFAULT_SCHEDULE_REQUIRED';
   end if;
 
@@ -1133,48 +1209,76 @@ revoke insert, update, delete on public.attendance_audit_log from authenticated;
 
 drop policy if exists "attendance_settings_read" on public.attendance_settings;
 create policy "attendance_settings_read" on public.attendance_settings
-for select to authenticated using (true);
+for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "attendance_settings_staff_write" on public.attendance_settings;
 create policy "attendance_settings_staff_write" on public.attendance_settings
-for all to authenticated using (public.attendance_is_staff())
-with check (public.attendance_is_staff());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.attendance_is_staff())
+with check (organization_id = public.current_org_id() and public.attendance_is_staff());
 
 drop policy if exists "work_schedules_read" on public.work_schedules;
 create policy "work_schedules_read" on public.work_schedules
-for select to authenticated using (true);
+for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "work_schedules_staff_write" on public.work_schedules;
 create policy "work_schedules_staff_write" on public.work_schedules
-for all to authenticated using (public.attendance_is_staff())
-with check (public.attendance_is_staff());
+for all to authenticated
+using (organization_id = public.current_org_id() and public.attendance_is_staff())
+with check (organization_id = public.current_org_id() and public.attendance_is_staff());
 
 drop policy if exists "work_schedule_segments_read" on public.work_schedule_segments;
 create policy "work_schedule_segments_read" on public.work_schedule_segments
-for select to authenticated using (true);
+for select to authenticated using (
+  exists (
+    select 1 from public.work_schedules schedule
+    where schedule.id = schedule_id
+      and schedule.organization_id = public.current_org_id()
+  )
+);
 drop policy if exists "work_schedule_segments_staff_write" on public.work_schedule_segments;
 create policy "work_schedule_segments_staff_write" on public.work_schedule_segments
-for all to authenticated using (public.attendance_is_staff())
-with check (public.attendance_is_staff());
+for all to authenticated
+using (
+  public.attendance_is_staff()
+  and exists (
+    select 1 from public.work_schedules schedule
+    where schedule.id = schedule_id
+      and schedule.organization_id = public.current_org_id()
+  )
+)
+with check (
+  public.attendance_is_staff()
+  and exists (
+    select 1 from public.work_schedules schedule
+    where schedule.id = schedule_id
+      and schedule.organization_id = public.current_org_id()
+  )
+);
 
 drop policy if exists "schedule_assignments_read" on public.employee_schedule_assignments;
 create policy "schedule_assignments_read" on public.employee_schedule_assignments
 for select to authenticated using (
-  employee_id = auth.uid() or public.attendance_is_staff()
+  employee_id = auth.uid()
+  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
 );
 drop policy if exists "schedule_assignments_staff_write" on public.employee_schedule_assignments;
 create policy "schedule_assignments_staff_write" on public.employee_schedule_assignments
-for all to authenticated using (public.attendance_is_staff())
-with check (public.attendance_is_staff());
+for all to authenticated
+using (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+with check (public.attendance_is_staff() and public.is_my_org_employee(employee_id));
 
 drop policy if exists "attendance_punches_read" on public.attendance_punches;
 create policy "attendance_punches_read" on public.attendance_punches
 for select to authenticated using (
-  employee_id = auth.uid() or public.attendance_is_staff()
+  employee_id = auth.uid()
+  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
 );
 
 drop policy if exists "attendance_corrections_read" on public.attendance_correction_requests;
 create policy "attendance_corrections_read" on public.attendance_correction_requests
 for select to authenticated using (
-  employee_id = auth.uid() or requester_id = auth.uid() or public.attendance_is_staff()
+  employee_id = auth.uid()
+  or requester_id = auth.uid()
+  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
 );
 drop policy if exists "attendance_corrections_submit" on public.attendance_correction_requests;
 create policy "attendance_corrections_submit" on public.attendance_correction_requests
@@ -1183,12 +1287,17 @@ for insert to authenticated with check (
   and status = 'pending'
   and reviewer_id is null
   and decided_at is null
-  and (employee_id = auth.uid() or public.attendance_is_staff())
+  and (
+    employee_id = auth.uid()
+    or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+  )
 );
 
 drop policy if exists "attendance_audit_staff_read" on public.attendance_audit_log;
 create policy "attendance_audit_staff_read" on public.attendance_audit_log
-for select to authenticated using (public.attendance_is_staff());
+for select to authenticated using (
+  public.attendance_is_staff() and public.is_my_org_employee(employee_id)
+);
 
 revoke all on function public.attendance_is_staff(uuid) from public;
 revoke all on function public.attendance_resolved_schedule(uuid, date) from public;
@@ -1245,6 +1354,10 @@ begin
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
     where employee.role in ('admin', 'manager')
+      and employee.organization_id = (
+        select subject.organization_id from public.employees as subject
+        where subject.id = new.employee_id
+      )
       and employee.id is distinct from new.requester_id
       and coalesce(employee.status, 'active') <> 'inactive';
 

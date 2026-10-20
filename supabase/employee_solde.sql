@@ -6,6 +6,15 @@
 -- Sick (and other non-annual types) get the full yearly default, not monthly.
 -- Unpaid stays 0. A future start date gets 0 annual days.
 
+-- Single-company databases only.
+do $$
+begin
+  if to_regclass('public.organizations') is not null then
+    raise exception 'This database has companies: this one-off fix would rewrite the balances of every company.';
+  end if;
+end;
+$$;
+
 alter table public.employees
   add column if not exists monthly_leave_days numeric default 1.5;
 
