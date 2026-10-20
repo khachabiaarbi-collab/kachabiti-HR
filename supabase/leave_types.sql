@@ -1,6 +1,15 @@
 -- Run in the SQL editor. Seeds the Kachabiti leave catalog
 -- (vacation, sick, parental, exceptional) and balances for current employees.
 
+-- Single-company databases only.
+do $$
+begin
+  if to_regclass('public.organizations') is not null then
+    raise exception 'This database has companies: each company gets its leave catalog from supabase/saas/01_foundation.sql (create_organization).';
+  end if;
+end;
+$$;
+
 alter table public.leave_types
   add column if not exists code text;
 

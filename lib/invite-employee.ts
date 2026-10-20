@@ -70,7 +70,7 @@ export async function inviteEmployee(input: {
 
   const { data: employee } = await supabase
     .from("employees")
-    .select("id, role")
+    .select("id, role, organization_id")
     .eq("id", user.id)
     .maybeSingle();
   if (!employee || !isStaff(employee.role)) {
@@ -80,6 +80,9 @@ export async function inviteEmployee(input: {
   const name = input.name.trim();
   const email = input.email.trim();
   if (!name || !email) return "Name and work email are required";
+  // Set by supabase/saas/01_foundation.sql; absent on a single-company base.
+  const organizationId =
+    (employee as { organization_id?: string | null }).organization_id ?? null;
 
   const origin = appOrigin(await headers());
   const jobTitle = input.jobTitle.trim() || null;
@@ -88,10 +91,23 @@ export async function inviteEmployee(input: {
   const monthlyLeaveDays = parseMonthlyLeaveDays(input.monthlyLeaveDays);
   const role = toDbRole(input.role);
 
+  // Read with the inviter's client: RLS only shows their own company.
+  if (departmentId) {
+    const { data: department } = await supabase
+      .from("departments")
+      .select("id")
+      .eq("id", departmentId)
+      .maybeSingle();
+    if (!department) return "Department not found";
+  }
+
   try {
     const admin = createAdminClient();
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: name },
+      // The new-user trigger joins the invited user to this company.
+      data: organizationId
+        ? { full_name: name, organization_id: organizationId }
+        : { full_name: name },
       redirectTo: `${origin}/reset-password`,
     });
     if (error) {
@@ -104,6 +120,19 @@ export async function inviteEmployee(input: {
     const userId = data.user.id;
     const userEmail = data.user.email ?? email;
 
+    // Re-inviting a pending user returns the existing account: never take
+    // over an employee of another company.
+    if (organizationId) {
+      const { data: existing } = await admin
+        .from("employees")
+        .select("organization_id")
+        .eq("id", userId)
+        .maybeSingle();
+      if (existing && existing.organization_id !== organizationId) {
+        return "This email already belongs to another company";
+      }
+    }
+
     const employeeRow = {
       id: userId,
       full_name: name,
@@ -114,6 +143,7 @@ export async function inviteEmployee(input: {
       monthly_leave_days: monthlyLeaveDays,
       role,
       status: "active",
+      ...(organizationId ? { organization_id: organizationId } : {}),
     };
     let { error: upsertError } = await admin
       .from("employees")
@@ -133,12 +163,12 @@ export async function inviteEmployee(input: {
       code?: string | null;
     };
     let leaveTypes: LeaveTypeSeed[] | null = null;
-    let { data: typedLeaveTypes, error: typesError } = await admin
+    let { data: typedLeaveTypes, error: typesError } = await supabase
       .from("leave_types")
       .select("id, name, default_days, code");
     leaveTypes = typedLeaveTypes;
     if (typesError) {
-      const retry = await admin
+      const retry = await supabase
         .from("leave_types")
         .select("id, name, default_days");
       leaveTypes = retry.data;

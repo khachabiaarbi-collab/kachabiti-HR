@@ -55,6 +55,15 @@ middleware.ts
 
 Import clients from `@/lib/supabase/client` (Client Components) and `@/lib/supabase/server` (Server Components, actions, route handlers).
 
+## Multi-company (branch `feature/generic-saas`)
+
+RHFlow, the multi-company version, is built step by step; the plan, the
+current state and the `rhflow-dev` setup are in [`SAAS.md`](SAAS.md). On a
+company database run [`supabase/saas/01_foundation.sql`](supabase/saas/01_foundation.sql)
+first and never `handle_new_user.sql` or `leave_types.sql`. Server actions
+that use the service role must check the target with `sameCompanyEmployee`
+(`lib/org-access.ts`).
+
 ## Auth
 
 Run [`supabase/handle_new_user.sql`](supabase/handle_new_user.sql) in the SQL editor so each Auth user gets an `employees` row. Then promote the first admin:

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { sameCompanyEmployee } from "@/lib/org-access";
 
 function isStaff(role: string | null | undefined) {
   return role === "admin" || role === "manager";
@@ -12,13 +13,13 @@ async function currentEmployee() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { user: null, employee: null };
+  if (!user) return { supabase, user: null, employee: null };
   const { data: employee } = await supabase
     .from("employees")
     .select("id, role")
     .eq("id", user.id)
     .maybeSingle();
-  return { user, employee };
+  return { supabase, user, employee };
 }
 
 /**
@@ -33,12 +34,15 @@ export type DeleteEmployeeError =
   | `delete.linked:${string}`;
 
 export async function deleteEmployeeRecord(id: string): Promise<DeleteEmployeeError | string | null> {
-  const { user, employee } = await currentEmployee();
+  const { supabase, user, employee } = await currentEmployee();
   if (!user || !employee || !isStaff(employee.role)) {
     return "delete.notAllowed";
   }
   if (id === user.id) {
     return "delete.self";
+  }
+  if (!(await sameCompanyEmployee(supabase, id))) {
+    return "delete.notAllowed";
   }
 
   let admin;
@@ -88,10 +92,17 @@ export async function deleteEmployeeRecord(id: string): Promise<DeleteEmployeeEr
 }
 
 export async function deleteDepartmentRecord(id: string) {
-  const { user, employee } = await currentEmployee();
+  const { supabase, user, employee } = await currentEmployee();
   if (!user || !employee || !isStaff(employee.role)) {
     return "Not allowed";
   }
+  // RLS only shows departments of the caller's company.
+  const { data: department } = await supabase
+    .from("departments")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!department) return "Department not found";
 
   try {
     const admin = createAdminClient();
@@ -112,12 +123,13 @@ export async function deleteDepartmentRecord(id: string) {
 }
 
 export async function deleteLeaveRequestRecord(id: string) {
-  const { user, employee } = await currentEmployee();
+  const { supabase, user, employee } = await currentEmployee();
   if (!user || !employee) return "Not allowed";
 
   try {
     const admin = createAdminClient();
-    const { data: request, error: loadError } = await admin
+    // Read with the caller's client: RLS limits it to their company.
+    const { data: request, error: loadError } = await supabase
       .from("leave_requests")
       .select("id, employee_id, status")
       .eq("id", id)
@@ -140,7 +152,7 @@ export async function deleteLeaveRequestRecord(id: string) {
 }
 
 export async function deleteAuthorizationRecord(id: string) {
-  const { user, employee } = await currentEmployee();
+  const { supabase, user, employee } = await currentEmployee();
   if (!user || !employee) return "Not allowed";
 
   try {
@@ -157,6 +169,9 @@ export async function deleteAuthorizationRecord(id: string) {
       request.employee_id === user.id && request.status === "pending";
     if (!isStaff(employee.role) && !ownPending) {
       return "Not allowed";
+    }
+    if (!(await sameCompanyEmployee(supabase, request.employee_id))) {
+      return "Request not found";
     }
 
     const { error } = await admin.from("authorizations").delete().eq("id", id);

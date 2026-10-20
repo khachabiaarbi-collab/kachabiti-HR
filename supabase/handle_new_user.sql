@@ -1,6 +1,15 @@
 -- Run this in the Supabase SQL editor after the tables/RLS script.
 -- Creates an employees row for every new Auth user (bypasses admin-only INSERT RLS).
 
+-- Single-company databases only.
+do $$
+begin
+  if to_regclass('public.organizations') is not null then
+    raise exception 'This database has companies: the new-user trigger comes from supabase/saas/01_foundation.sql. Running this script would replace it.';
+  end if;
+end;
+$$;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql

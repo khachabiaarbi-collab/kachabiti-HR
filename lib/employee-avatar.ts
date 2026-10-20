@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { sameCompanyEmployee } from "@/lib/org-access";
 import {
   AVATAR_MAX_BYTES,
   AVATAR_TYPES,
@@ -76,6 +77,9 @@ export async function uploadEmployeeAvatar(formData: FormData) {
     )
   ) {
     return { error: "You cannot change this photo", url: null };
+  }
+  if (targetId !== user.id && !(await sameCompanyEmployee(supabase, targetId))) {
+    return { error: "Employee not found", url: null };
   }
 
   const path = avatarStoragePath(targetId, file.type);

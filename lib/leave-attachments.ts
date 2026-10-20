@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { sameCompanyEmployee } from "@/lib/org-access";
 
 const BUCKET = "leave-attachments";
 
@@ -69,6 +70,7 @@ export async function getLeaveAttachmentUrl(path: string) {
 
   const ownerId = path.split("/")[0];
   if (!isStaff(employee.role) && ownerId !== user.id) return null;
+  if (ownerId !== user.id && !(await sameCompanyEmployee(supabase, ownerId))) return null;
 
   try {
     const admin = createAdminClient();

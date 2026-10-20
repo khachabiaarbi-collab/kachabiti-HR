@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { sameCompanyEmployee } from "@/lib/org-access";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -27,6 +28,9 @@ export async function updateEmployeeAccount(input: {
     .maybeSingle();
   if (!me || me.role !== "admin" || me.status === "inactive") {
     return "Only administrators can change an employee's account.";
+  }
+  if (!(await sameCompanyEmployee(supabase, input.employeeId))) {
+    return "Employee not found.";
   }
 
   const email = input.email?.trim().toLowerCase();
@@ -74,6 +78,9 @@ export async function saveEmployeeSolde(input: {
     .maybeSingle();
   if (!me || (me.role !== "admin" && me.role !== "manager") || me.status === "inactive") {
     return "Only administrators and managers can change leave balances.";
+  }
+  if (!(await sameCompanyEmployee(supabase, input.employeeId))) {
+    return "Employee not found.";
   }
 
   const rows = input.rows.filter((row) => row.leaveTypeId);
