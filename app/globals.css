@@ -2322,6 +2322,12 @@ select {
   box-shadow: -15px 0 40px #00000020;
   overflow-y: auto;
 }
+.panel-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
 .side-panel h2 {
   margin: 20px 0 4px;
   color: #292929;

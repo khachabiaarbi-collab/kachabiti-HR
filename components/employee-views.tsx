@@ -799,6 +799,7 @@ function Profile({
     setUploadingPhoto(true);
     const payload = new FormData();
     payload.append("file", file);
+    if (employee?.id) payload.append("employeeId", employee.id);
     try {
       const uploaded = await uploadEmployeeAvatar(payload);
       if (uploaded.error) {
