@@ -51,7 +51,7 @@ import {
   toDbStatus,
 } from "@/lib/map-rows";
 import { inviteEmployee } from "@/lib/invite-employee";
-import { updateEmployeeAccount } from "@/lib/employee-account";
+import { saveEmployeeSolde, updateEmployeeAccount } from "@/lib/employee-account";
 import type { VacationFigure } from "@/lib/use-leave-hours";
 import {
   formatDaysLabel,
@@ -1045,18 +1045,17 @@ export function EmployeeDetail({
     }
 
     if (solde.length) {
-      const { error: soldeError } = await supabase.from("leave_balances").upsert(
-        solde.map((row) => ({
-          employee_id: employee.id,
-          leave_type_id: row.leaveTypeId,
-          days_remaining: row.daysRemaining,
+      const soldeError = await saveEmployeeSolde({
+        employeeId: employee.id,
+        rows: solde.map((row) => ({
+          leaveTypeId: row.leaveTypeId,
+          daysRemaining: row.daysRemaining,
         })),
-        { onConflict: "employee_id,leave_type_id" },
-      );
+      });
 
       if (soldeError) {
         setSaving(false);
-        flash(soldeError.message, "error");
+        flash(soldeError, "error");
         return;
       }
     }

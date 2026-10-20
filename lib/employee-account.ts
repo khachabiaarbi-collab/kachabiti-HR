@@ -50,3 +50,52 @@ export async function updateEmployeeAccount(input: {
   });
   return error?.message ?? null;
 }
+
+/**
+ * Admin or manager: save an employee's opening leave balances. Written with
+ * the service role because the upsert also inserts the leave types the
+ * employee has no row for yet, which the browser's RLS policy refuses.
+ * Returns an error message, or null when it worked.
+ */
+export async function saveEmployeeSolde(input: {
+  employeeId: string;
+  rows: { leaveTypeId: string; daysRemaining: number }[];
+}): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return "You must be signed in.";
+
+  const { data: me } = await supabase
+    .from("employees")
+    .select("role, status")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!me || (me.role !== "admin" && me.role !== "manager") || me.status === "inactive") {
+    return "Only administrators and managers can change leave balances.";
+  }
+
+  const rows = input.rows.filter((row) => row.leaveTypeId);
+  if (!rows.length) return null;
+  if (rows.some((row) => !Number.isFinite(row.daysRemaining))) {
+    return "Enter a valid number of days.";
+  }
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return "Saving balances needs SUPABASE_SERVICE_ROLE_KEY on the server.";
+  }
+
+  const { error } = await admin.from("leave_balances").upsert(
+    rows.map((row) => ({
+      employee_id: input.employeeId,
+      leave_type_id: row.leaveTypeId,
+      days_remaining: row.daysRemaining,
+    })),
+    { onConflict: "employee_id,leave_type_id" },
+  );
+  return error?.message ?? null;
+}
