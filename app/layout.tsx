@@ -1,8 +1,11 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
+import { Geist } from 'next/font/google'
 import { cookies } from 'next/headers'
 import { LanguageProvider, type Locale } from '@/lib/i18n'
 import './globals.css'
+
+const sans = Geist({ subsets: ['latin'], variable: '--font-geist', display: 'swap' })
 
 export const metadata: Metadata = {
   title: 'Kachabiti | Leave management for modern teams',
@@ -21,7 +24,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const locale: Locale = stored === 'fr' ? 'fr' : 'en'
 
   return (
-    <html lang={locale} className="bg-background" suppressHydrationWarning>
+    <html lang={locale} className={`bg-background ${sans.variable}`} suppressHydrationWarning>
       <body className="antialiased">
         <LanguageProvider initialLocale={locale}>{children}</LanguageProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}

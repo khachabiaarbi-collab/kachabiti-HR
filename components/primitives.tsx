@@ -169,18 +169,26 @@ export function Button({
   onClick,
   secondary = false,
   type,
+  disabled = false,
+  busy = false,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   secondary?: boolean;
   type?: "button" | "submit";
+  disabled?: boolean;
+  /** Shows a spinner and blocks clicks while an action runs. */
+  busy?: boolean;
 }) {
   return (
     <button
       type={type}
-      className={secondary ? "secondary-button" : "primary-button"}
+      className={`${secondary ? "secondary-button" : "primary-button"}${busy ? " is-busy" : ""}`}
       onClick={onClick}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
     >
+      {busy && <span className="button-spinner" aria-hidden="true" />}
       {children}
     </button>
   );
@@ -196,6 +204,9 @@ export function Field({
   min,
   max,
   readOnly = false,
+  required = false,
+  hint,
+  error,
 }: {
   label: string;
   type?: string;
@@ -206,11 +217,27 @@ export function Field({
   min?: string;
   max?: string;
   readOnly?: boolean;
+  required?: boolean;
+  /** Helper text under the input. */
+  hint?: string;
+  /** Validation message; replaces the hint and marks the input invalid. */
+  error?: string | null;
 }) {
+  const caption = error ? (
+    <span className="field-error" role="alert">{error}</span>
+  ) : hint ? (
+    <span className="field-hint">{hint}</span>
+  ) : null;
+  const heading = (
+    <span className="form-label-text">
+      {label}
+      {required && <span className="field-required" aria-hidden="true"> *</span>}
+    </span>
+  );
   if (type === "date") {
     return (
-      <label className="form-label">
-        {label}
+      <label className={`form-label${error ? " has-error" : ""}`}>
+        {heading}
         <DatePicker
           name={name}
           value={onChange || readOnly ? value : undefined}
@@ -219,13 +246,14 @@ export function Field({
           readOnly={readOnly}
           onChange={onChange}
         />
+        {caption}
       </label>
     );
   }
 
   return (
-    <label className="form-label">
-      {label}
+    <label className={`form-label${error ? " has-error" : ""}${readOnly ? " is-readonly" : ""}`}>
+      {heading}
       <input
         type={type}
         name={name}
@@ -234,12 +262,15 @@ export function Field({
         max={max}
         autoComplete="off"
         readOnly={readOnly}
+        required={required}
+        aria-invalid={error ? true : undefined}
         {...(onChange
           ? { value: value ?? "", onChange: (e) => onChange(e.target.value) }
           : readOnly
             ? { value: value ?? "" }
             : { defaultValue: value })}
       />
+      {caption}
     </label>
   );
 }
