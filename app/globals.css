@@ -283,6 +283,8 @@ button {
   flex: 1;
 }
 .topbar {
+  position: relative;
+  z-index: 20;
   height: 72px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -531,8 +533,8 @@ button {
 }
 .search-results {
   position: absolute;
-  z-index: 12;
-  top: 39px;
+  z-index: 30;
+  top: calc(100% + 8px);
   right: 0;
   width: 280px;
   padding: 12px;
@@ -2732,6 +2734,8 @@ select {
   width: 100%;
 }
 .employee-nav {
+  position: relative;
+  z-index: 20;
   height: 72px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -4059,6 +4063,8 @@ button.attendance-report-row:hover {
     display: none;
   }
   .employee-mobile-top {
+    position: relative;
+    z-index: 20;
     display: flex;
     height: 60px;
     padding: 0 17px;
@@ -4132,8 +4138,18 @@ button.attendance-report-row:hover {
   .form-row {
     grid-template-columns: 1fr;
   }
-  .global-search {
-    display: none;
+  .global-search.expanded,
+  .global-search:focus-within {
+    position: absolute;
+    z-index: 31;
+    top: 50%;
+    right: 0;
+    width: min(320px, calc(100vw - 32px));
+    transform: translateY(-50%);
+    box-shadow: 0 8px 24px #0f172a14;
+  }
+  .search-results {
+    width: min(320px, calc(100vw - 32px));
   }
   .notification-panel {
     right: -80px;
