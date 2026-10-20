@@ -31,7 +31,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { Header, Metric } from "@/components/primitives";
+import { Header, Metric, ModernSelect } from "@/components/primitives";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
 import { creditDay, explicitBreakMinutes, type DayCredit } from "@/lib/payroll-calc";
 import {
@@ -1098,53 +1098,60 @@ export function AdminAttendance({
               </div>
               <label>
                 {t("admin.colEmployee")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("admin.colEmployee")}
                   value={employeeId}
-                  onChange={(event) => {
-                    setEmployeeId(event.target.value);
+                  onChange={(value) => {
+                    setEmployeeId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("att.allEmployees")}</option>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: t("att.allEmployees") },
+                    ...employees.map((employee) => ({
+                      value: employee.id,
+                      label: employee.name,
+                    })),
+                  ]}
+                />
               </label>
               <label>
                 {t("filter.department")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("filter.department")}
                   value={departmentId}
-                  onChange={(event) => {
-                    setDepartmentId(event.target.value);
+                  onChange={(value) => {
+                    setDepartmentId(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("admin.allDepartments")}</option>
-                  {departments.map((department) => (
-                    <option key={department.id} value={department.id}>
-                      {department.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: t("admin.allDepartments") },
+                    ...departments.map((department) => ({
+                      value: department.id,
+                      label: department.name,
+                    })),
+                  ]}
+                />
               </label>
               <label>
                 {t("filter.status")}
-                <select
+                <ModernSelect
+                  block
+                  ariaLabel={t("filter.status")}
                   value={status}
-                  onChange={(event) => {
-                    setStatus(event.target.value);
+                  onChange={(value) => {
+                    setStatus(value);
                     setPage(1);
                   }}
-                >
-                  <option value="">{t("att.allStatuses")}</option>
-                  <option value="present">{t("att.present")}</option>
-                  <option value="absent">{t("att.completed")}</option>
-                  <option value="incomplete">{t("att.incomplete")}</option>
-                  <option value="locked">{t("att.locked")}</option>
-                </select>
+                  options={[
+                    { value: "", label: t("att.allStatuses") },
+                    { value: "present", label: t("att.present") },
+                    { value: "absent", label: t("att.completed") },
+                    { value: "incomplete", label: t("att.incomplete") },
+                    { value: "locked", label: t("att.locked") },
+                  ]}
+                />
               </label>
               <button
                 type="button"
@@ -1268,15 +1275,17 @@ export function AdminAttendance({
               <p className="eyebrow">{t("att.reviewQueue")}</p>
               <h2>{t("att.corrections")}</h2>
             </div>
-            <select
+            <ModernSelect
+              ariaLabel={t("filter.status")}
               value={correctionStatus}
-              onChange={(event) => setCorrectionStatus(event.target.value)}
-            >
-              <option value="">{t("att.allStatuses")}</option>
-              <option value="pending">{translateStatus(t, "pending")}</option>
-              <option value="approved">{translateStatus(t, "approved")}</option>
-              <option value="rejected">{translateStatus(t, "rejected")}</option>
-            </select>
+              onChange={setCorrectionStatus}
+              options={[
+                { value: "", label: t("att.allStatuses") },
+                { value: "pending", label: translateStatus(t, "pending") },
+                { value: "approved", label: translateStatus(t, "approved") },
+                { value: "rejected", label: translateStatus(t, "rejected") },
+              ]}
+            />
           </div>
           {loading ? (
             <div className="attendance-report-empty">
@@ -1944,25 +1953,26 @@ export function AttendanceScheduleSettings({
             >
               <GripVertical size={15} />
             </button>
-            <select
-              value={segment.isoWeekday}
-              onChange={(event) =>
-                updateSegment(index, "isoWeekday", Number(event.target.value))
-              }
-            >
-              {WEEKDAY_KEYS.map((dayKey, dayIndex) => (
-                <option key={dayKey} value={dayIndex + 1}>
-                  {t(dayKey)}
-                </option>
-              ))}
-            </select>
-            <select
+            <ModernSelect
+              block
+              ariaLabel={t("att.columnDay")}
+              value={String(segment.isoWeekday)}
+              onChange={(value) => updateSegment(index, "isoWeekday", Number(value))}
+              options={WEEKDAY_KEYS.map((dayKey, dayIndex) => ({
+                value: String(dayIndex + 1),
+                label: t(dayKey),
+              }))}
+            />
+            <ModernSelect
+              block
+              ariaLabel={t("att.columnKind")}
               value={segment.kind}
-              onChange={(event) => updateSegment(index, "kind", event.target.value)}
-            >
-              <option value="work">{t("att.work")}</option>
-              <option value="break">{t("att.break")}</option>
-            </select>
+              onChange={(value) => updateSegment(index, "kind", value)}
+              options={[
+                { value: "work", label: t("att.work") },
+                { value: "break", label: t("att.break") },
+              ]}
+            />
             <input
               type="time"
               value={segment.startTime.slice(0, 5)}
@@ -2213,44 +2223,55 @@ function CorrectionRequestModal({
         {direct && (
           <label className="form-label">
             {t("admin.colEmployee")}
-            <select
+            <ModernSelect
+              block
+              ariaLabel={t("admin.colEmployee")}
               value={employeeId}
-              onChange={(event) => setEmployeeId(event.target.value)}
               disabled={Boolean(direct.employeeId)}
-              required
-            >
-              <option value="">{t("att.chooseEmployeeOption")}</option>
-              {direct.employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name}
-                </option>
-              ))}
-            </select>
+              onChange={setEmployeeId}
+              options={[
+                { value: "", label: t("att.chooseEmployeeOption") },
+                ...direct.employees.map((employee) => ({
+                  value: employee.id,
+                  label: employee.name,
+                })),
+              ]}
+            />
           </label>
         )}
         <label className="form-label">
           {t("att.operation")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("att.operation")}
             value={operation}
-            onChange={(event) => setOperation(event.target.value as CorrectionOperation)}
             disabled={!draft.target}
-          >
-            <option value="add">{t("att.addPunch")}</option>
-            {draft.target && <option value="change">{t("att.changePunch")}</option>}
-            {draft.target && <option value="void">{t("att.removePunch")}</option>}
-          </select>
+            onChange={(value) => setOperation(value as CorrectionOperation)}
+            options={[
+              { value: "add", label: t("att.addPunch") },
+              ...(draft.target
+                ? [
+                    { value: "change", label: t("att.changePunch") },
+                    { value: "void", label: t("att.removePunch") },
+                  ]
+                : []),
+            ]}
+          />
         </label>
         {operation !== "void" && (
           <div className="form-row">
             <label className="form-label">
               {t("att.punchType")}
-              <select
+              <ModernSelect
+                block
+                ariaLabel={t("att.punchType")}
                 value={type}
-                onChange={(event) => setType(event.target.value as AttendancePunchType)}
-              >
-                <option value="entry">{t("att.entry")}</option>
-                <option value="exit">{t("att.exit")}</option>
-              </select>
+                onChange={(value) => setType(value as AttendancePunchType)}
+                options={[
+                  { value: "entry", label: t("att.entry") },
+                  { value: "exit", label: t("att.exit") },
+                ]}
+              />
             </label>
           </div>
         )}

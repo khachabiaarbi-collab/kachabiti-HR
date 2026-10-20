@@ -4780,7 +4780,7 @@ button.attendance-report-row:hover {
 /* "How much for N days?" */
 .pay-simulator-input {
   display: grid;
-  grid-template-columns: 1fr 110px;
+  grid-template-columns: 1fr minmax(132px, 160px);
   gap: 8px;
 }
 .pay-simulator-input input,
@@ -5088,4 +5088,127 @@ select option {
 }
 .credited-cell.is-empty {
   color: #94a3b8;
+}
+.modern-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 148px;
+  max-width: 240px;
+  height: 36px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: #525252;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.modern-select:hover {
+  border-color: #cfcfca;
+  background: #fafaf8;
+}
+.modern-select:focus-visible {
+  outline: 0;
+  border-color: #477356;
+  box-shadow: 0 0 0 3px rgb(71 115 86 / 18%);
+}
+.modern-select[data-popup-open] {
+  border-color: #171717;
+  box-shadow: 0 0 0 3px rgb(23 23 23 / 6%);
+}
+.modern-select.is-active {
+  border-color: #171717;
+  background: #171717;
+  color: #fff;
+}
+.modern-select-prefix {
+  color: rgb(255 255 255 / 60%);
+  font-weight: 500;
+}
+.modern-select-prefix::after {
+  content: " ·";
+}
+.modern-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modern-select-icon {
+  display: flex;
+  margin-left: auto;
+  color: #a3a3a3;
+  transition: transform 0.15s ease;
+}
+.modern-select.is-block {
+  display: flex;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.modern-select.is-active .modern-select-icon {
+  color: rgb(255 255 255 / 70%);
+}
+.modern-select[data-popup-open] .modern-select-icon {
+  transform: rotate(180deg);
+}
+.modern-select-positioner {
+  z-index: 80;
+  outline: 0;
+}
+.modern-select-popup {
+  min-width: var(--anchor-width);
+  max-height: min(320px, var(--available-height));
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid #e5e5e2;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(23 23 23 / 12%), 0 2px 6px rgb(23 23 23 / 6%);
+  transform-origin: var(--transform-origin);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.modern-select-popup[data-starting-style],
+.modern-select-popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.97) translateY(-4px);
+}
+.modern-select-list {
+  display: grid;
+  gap: 1px;
+  outline: 0;
+}
+.modern-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #3f3f46;
+  font-size: 12px;
+  cursor: pointer;
+  outline: 0;
+  user-select: none;
+}
+.modern-select-item[data-highlighted] {
+  background: #f4f4f2;
+  color: #171717;
+}
+.modern-select-item[data-selected] {
+  color: #171717;
+  font-weight: 650;
+}
+.modern-select-check {
+  display: flex;
+  color: #477356;
+}
+@media (prefers-reduced-motion: reduce) {
+  .modern-select,
+  .modern-select-icon,
+  .modern-select-popup {
+    transition: none;
+  }
 }

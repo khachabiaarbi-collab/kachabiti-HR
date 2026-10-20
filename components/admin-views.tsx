@@ -36,6 +36,7 @@ import {
   Field,
   FilterBar,
   Header,
+  ModernSelect,
   LeaveTypeLabel,
   Metric,
   Pagination,
@@ -1830,18 +1831,18 @@ export function Calendar({
             <ChevronRight size={16} />
           </button>
           {departments.length > 0 && (
-            <select
-              className="filter-select"
+            <ModernSelect
+              ariaLabel={t("filter.department")}
               value={department}
-              onChange={(event) => setDepartment(event.target.value)}
-            >
-              <option value="All">{t("admin.allDepartments")}</option>
-              {departments.map((item) => (
-                <option key={item.id} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+              onChange={setDepartment}
+              options={[
+                { value: "All", label: t("admin.allDepartments") },
+                ...departments.map((item) => ({
+                  value: item.name,
+                  label: item.name,
+                })),
+              ]}
+            />
           )}
           <span className="calendar-legend">
             <i className="legend-leave" />

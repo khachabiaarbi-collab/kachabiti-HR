@@ -11,7 +11,7 @@ import type {
   LeaveType,
 } from "@/lib/app-types";
 import { ContractSection } from "@/components/payroll-views";
-import { Avatar, Button, Field, Status } from "@/components/primitives";
+import { Avatar, Button, Field, ModernSelect, Status } from "@/components/primitives";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -286,20 +286,20 @@ export function RequestModal({
         )}
         <label className="form-label">
           {t("modal.leaveType")}
-          <select
-            name="leave_type_id"
+          <ModernSelect
+            block
+            ariaLabel={t("modal.leaveType")}
             value={leaveTypeId}
-            onChange={(event) => chooseType(event.target.value)}
-          >
-            {leaveTypes.length === 0 && (
-              <option value="">{t("modal.noTypes")}</option>
-            )}
-            {leaveTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {leaveTypeLabel(t, type.name)}
-              </option>
-            ))}
-          </select>
+            onChange={chooseType}
+            options={
+              leaveTypes.length === 0
+                ? [{ value: "", label: t("modal.noTypes") }]
+                : leaveTypes.map((type) => ({
+                    value: type.id,
+                    label: leaveTypeLabel(t, type.name),
+                  }))
+            }
+          />
         </label>
         <div className="form-row">
           <Field
@@ -608,14 +608,17 @@ export function EventModal({
         </div>
         <label className="form-label">
           {t("modal.eventType")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("modal.eventType")}
             value={type}
-            onChange={(event) => setType(event.target.value)}
-          >
-            <option value="Company Holiday">{t("modal.companyHoliday")}</option>
-            <option value="Team Event">{t("modal.teamEvent")}</option>
-            <option value="Other">{t("modal.other")}</option>
-          </select>
+            onChange={setType}
+            options={[
+              { value: "Company Holiday", label: t("modal.companyHoliday") },
+              { value: "Team Event", label: t("modal.teamEvent") },
+              { value: "Other", label: t("modal.other") },
+            ]}
+          />
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
@@ -701,17 +704,19 @@ export function DepartmentModal({
         </label>
         <label className="form-label">
           {t("modal.assignManager")}
-          <select
+          <ModernSelect
+            block
+            ariaLabel={t("modal.assignManager")}
             value={managerId}
-            onChange={(e) => setManagerId(e.target.value)}
-          >
-            <option value="">{t("department.unassigned")}</option>
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
+            onChange={setManagerId}
+            options={[
+              { value: "", label: t("department.unassigned") },
+              ...employees.map((employee) => ({
+                value: employee.id,
+                label: employee.name,
+              })),
+            ]}
+          />
         </label>
         <div className="modal-actions">
           <Button type="button" secondary onClick={close}>
@@ -824,30 +829,33 @@ export function EmployeeModal({
         <div className="form-row">
           <label className="form-label">
             {t("profile.department")}
-            <select
-              name="department_id"
+            <ModernSelect
+              block
+              ariaLabel={t("profile.department")}
               value={departmentId}
-              onChange={(event) => setDepartmentId(event.target.value)}
-            >
-              <option value="">{t("department.unassigned")}</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.id}>
-                  {department.name}
-                </option>
-              ))}
-            </select>
+              onChange={setDepartmentId}
+              options={[
+                { value: "", label: t("department.unassigned") },
+                ...departments.map((department) => ({
+                  value: department.id,
+                  label: department.name,
+                })),
+              ]}
+            />
           </label>
           <label className="form-label">
             {t("profile.role")}
-            <select
-              name="role"
+            <ModernSelect
+              block
+              ariaLabel={t("profile.role")}
               value={role}
-              onChange={(event) => setRole(event.target.value)}
-            >
-              <option value="Employee">{translateRole(t, "Employee")}</option>
-              <option value="Manager">{translateRole(t, "Manager")}</option>
-              <option value="Administrator">{translateRole(t, "Administrator")}</option>
-            </select>
+              onChange={setRole}
+              options={[
+                { value: "Employee", label: translateRole(t, "Employee") },
+                { value: "Manager", label: translateRole(t, "Manager") },
+                { value: "Administrator", label: translateRole(t, "Administrator") },
+              ]}
+            />
           </label>
         </div>
         <Field

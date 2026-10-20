@@ -877,6 +877,8 @@ export const en = {
   "att.settingsLoading": "Loading attendance settings…",
   "att.noSchedule": "No work schedule is configured.",
   "att.scheduleName": "Name",
+  "att.columnDay": "Day",
+  "att.columnKind": "Type",
   "att.newSchedule": "New schedule",
   "att.newScheduleName": "Part-time",
   "att.mixedHint":
@@ -1812,6 +1814,8 @@ export const fr: Record<keyof typeof en, string> = {
   "att.settingsLoading": "Chargement des paramètres de présence…",
   "att.noSchedule": "Aucun horaire n’est configuré.",
   "att.scheduleName": "Nom",
+  "att.columnDay": "Jour",
+  "att.columnKind": "Type",
   "att.newSchedule": "Nouvel horaire",
   "att.newScheduleName": "Temps partiel",
   "att.mixedHint":
