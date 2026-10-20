@@ -1764,6 +1764,92 @@ select {
   font-weight: 500;
   text-align: center;
 }
+.analytics-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.analytics-page .metric-grid,
+.analytics-page .welcome-row {
+  margin-bottom: 0;
+}
+.analytics-year {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+}
+.analytics-year select {
+  min-width: 110px;
+}
+.analytics-metrics-secondary {
+  grid-template-columns: minmax(220px, 1fr);
+}
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.analytics-bars,
+.analytics-people {
+  list-style: none;
+  margin: 0;
+  padding: 4px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.analytics-bars li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: #374151;
+  font-size: 13px;
+}
+.analytics-bars b {
+  color: #111827;
+  font-weight: 600;
+}
+.analytics-bars i {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+}
+.analytics-bars em {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #6366f1;
+}
+.analytics-people button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid #f3f4f6;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.analytics-people li:last-child button {
+  border-bottom: 0;
+}
+.analytics-people b {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+.analytics-people span {
+  color: #6b7280;
+  font-size: 12px;
+}
 .settings-card {
   display: grid;
   grid-template-columns: 268px 1fr;
@@ -3866,6 +3952,9 @@ button.attendance-report-row:hover {
   }
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .analytics-grid {
+    grid-template-columns: 1fr;
   }
   .attendance-details {
     grid-template-columns: 1fr;

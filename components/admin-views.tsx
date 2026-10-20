@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Building2,
@@ -78,9 +78,15 @@ import {
   requestedLeaveDays,
 } from "@/lib/map-rows";
 import {
+  formatLeaveDayCount,
   punchedMinutesByEmployee,
   uncoveredAuthorizationMinutes,
 } from "@/lib/leave-hours";
+import {
+  analyticsYearOptions,
+  buildLeaveAnalytics,
+  type LeaveKind,
+} from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
 import { holidaysInMonth, loadTunisiaHolidays } from "@/lib/tunisia-holidays";
 import {
@@ -478,7 +484,15 @@ export function AdminView({
     );
   }
   if (active === "Analytics") {
-    return <Analytics requests={requests} employees={employees} />;
+    return (
+      <Analytics
+        requests={requests}
+        employees={employees}
+        leaveTypes={leaveTypes}
+        authorizations={authorizations}
+        onOpenEmployee={setSelected}
+      />
+    );
   }
   if (active === "Settings") {
     return (
@@ -1958,111 +1972,239 @@ function dayAwayChips(
   return [...leaveChips, ...authzChips];
 }
 
+const LEAVE_KIND_LABEL: Record<LeaveKind, MessageKey> = {
+  annual: "leaveType.annual",
+  sick: "leaveType.sick",
+  unpaid: "leaveType.unpaid",
+  other: "admin.leaveOther",
+};
+
+function AnalyticsBarList({
+  rows,
+  empty,
+}: {
+  rows: { name: string; days: number }[];
+  empty: string;
+}) {
+  const { dateLocale } = useLanguage();
+  const max = Math.max(...rows.map((row) => row.days), 0);
+  if (max === 0) return <div className="table-empty">{empty}</div>;
+  return (
+    <ul className="analytics-bars">
+      {rows.map((row) => (
+        <li key={row.name}>
+          <div>
+            <span>{row.name}</span>
+            <b>{formatLeaveDayCount(row.days, dateLocale)}</b>
+          </div>
+          <i>
+            <em style={{ width: `${Math.max(4, (row.days / max) * 100)}%` }} />
+          </i>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AnalyticsPeopleList({
+  people,
+  empty,
+  employees,
+  onOpenEmployee,
+}: {
+  people: { id: string; employeeId: string; name: string; type: string; startDate: string; endDate: string }[];
+  empty: string;
+  employees: Map<string, Employee>;
+  onOpenEmployee: (employee: Employee) => void;
+}) {
+  const { t, dateLocale } = useLanguage();
+  if (people.length === 0) return <div className="table-empty">{empty}</div>;
+  return (
+    <ul className="analytics-people">
+      {people.map((person) => (
+        <li key={person.id}>
+          <button
+            type="button"
+            onClick={() => {
+              const employee = employees.get(person.employeeId);
+              if (employee) onOpenEmployee(employee);
+            }}
+          >
+            <b>{person.name}</b>
+            <span>
+              {leaveTypeLabel(t, person.type)} ·{" "}
+              {formatDisplayDate(person.startDate, dateLocale)}
+              {person.startDate !== person.endDate
+                ? ` – ${formatDisplayDate(person.endDate, dateLocale)}`
+                : ""}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Analytics({
   requests,
   employees,
+  leaveTypes,
+  authorizations,
+  onOpenEmployee,
 }: {
   requests: LeaveRequest[];
   employees: Employee[];
+  leaveTypes: LeaveType[];
+  authorizations: Authorization[];
+  onOpenEmployee: (employee: Employee) => void;
 }) {
   const { t, dateLocale } = useLanguage();
-  const year = new Date().getFullYear();
-  const yearPrefix = String(year);
-  const thisYear = requests.filter((request) =>
-    request.startDate.startsWith(yearPrefix),
+  const today = isoDate();
+  const currentYear = Number(today.slice(0, 4));
+  const years = useMemo(
+    () =>
+      analyticsYearOptions(
+        [
+          ...requests.flatMap((request) => [request.startDate, request.endDate]),
+          ...authorizations.map((row) => row.date),
+        ],
+        currentYear,
+      ),
+    [requests, authorizations, currentYear],
   );
-  const approved = thisYear.filter((request) => request.status === "Approved");
-  const decided = thisYear.filter((request) => request.status !== "Pending");
-  const daysTaken = approved.reduce(
-    (total, request) =>
-      total + requestedLeaveDays(request.startDate, request.endDate),
-    0,
+  const [year, setYear] = useState(currentYear);
+  const snapshot = useMemo(
+    () =>
+      buildLeaveAnalytics({
+        year,
+        today,
+        requests,
+        employees,
+        leaveTypes,
+        authorizations,
+      }),
+    [year, today, requests, employees, leaveTypes, authorizations],
   );
-  const entitlement = employees
-    .filter((employee) => employee.status === "Active")
-    .reduce((total, employee) => {
-      const monthly = employee.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS;
-      return total + monthly * 12;
-    }, 0);
-  const utilization =
-    entitlement > 0 ? Math.round((daysTaken / entitlement) * 100) : 0;
-  const average =
-    approved.length > 0 ? daysTaken / approved.length : 0;
-  const approvalRate =
-    decided.length > 0
-      ? Math.round((approved.length / decided.length) * 100)
-      : 0;
-  const pending = requests.filter(
-    (request) => request.status === "Pending",
-  ).length;
-  const monthDays = Array.from({ length: 12 }, (_, index) => {
-    const month = `${yearPrefix}-${String(index + 1).padStart(2, "0")}`;
-    return approved
-      .filter((request) => request.startDate.startsWith(month))
-      .reduce(
-        (total, request) =>
-          total + requestedLeaveDays(request.startDate, request.endDate),
-        0,
-      );
-  });
-  const maxMonth = Math.max(...monthDays, 1);
+  const maxMonth = Math.max(...snapshot.monthDays, 1);
   const monthNames = Array.from({ length: 12 }, (_, index) =>
     new Date(year, index, 1).toLocaleDateString(dateLocale, { month: "short" }),
   );
+  const employeeById = useMemo(
+    () => new Map(employees.map((employee) => [employee.id, employee])),
+    [employees],
+  );
 
   return (
-    <>
+    <div className="analytics-page">
       <Header
         eyebrow={t("admin.insights")}
         title={screenLabel(t, "Analytics")}
-        action={null}
+        action={
+          <label className="analytics-year">
+            {t("admin.analyticsYear")}
+            <ModernSelect
+              ariaLabel={t("admin.analyticsYear")}
+              value={String(year)}
+              onChange={(value) => setYear(Number(value))}
+              options={years.map((option) => ({
+                value: String(option),
+                label: String(option),
+              }))}
+            />
+          </label>
+        }
       />
       <div className="metric-grid">
         <Metric
           label={t("admin.utilization")}
-          value={`${utilization}%`}
+          value={`${snapshot.utilization}%`}
           note={t("admin.utilizationNote", {
-            taken: daysTaken,
-            entitled: Math.round(entitlement),
+            taken: formatLeaveDayCount(snapshot.annualDaysTaken, dateLocale),
+            entitled: formatLeaveDayCount(snapshot.entitlement, dateLocale),
           })}
           tone="indigo"
           icon={<Activity size={19} />}
         />
         <Metric
           label={t("admin.average")}
-          value={approved.length === 0 ? "0d" : `${average.toFixed(1)}d`}
-          note={t("admin.averageNote", { count: approved.length })}
+          value={
+            snapshot.approvedCount === 0
+              ? `0${t("panel.daysShort")}`
+              : `${snapshot.averageDays.toFixed(1)}${t("panel.daysShort")}`
+          }
+          note={t("admin.averageNote", { count: snapshot.approvedCount })}
           tone="teal"
           icon={<Clock3 size={19} />}
         />
         <Metric
           label={t("admin.approvalRate")}
-          value={`${approvalRate}%`}
+          value={`${snapshot.approvalRate}%`}
           note={t("admin.approvalRateNote", {
-            approved: approved.length,
-            decided: decided.length,
+            approved: snapshot.approvedCount,
+            decided: snapshot.decidedCount,
           })}
           tone="amber"
           icon={<Check size={19} />}
         />
         <Metric
           label={t("admin.pendingApprovals")}
-          value={String(pending)}
+          value={String(snapshot.pendingCount)}
           note={t("admin.openRequests")}
           tone="rose"
           icon={<Activity size={19} />}
         />
+      </div>
+      <div className="metric-grid analytics-metrics-secondary">
+        <Metric
+          label={t("admin.authorizations")}
+          value={`${formatLeaveDayCount(snapshot.authorizationHours, dateLocale)} h`}
+          note={t("admin.authorizationNote", {
+            hours: formatLeaveDayCount(snapshot.authorizationHours, dateLocale),
+            days: formatLeaveDayCount(snapshot.authorizationDays, dateLocale),
+          })}
+          tone="teal"
+          icon={<Clock3 size={19} />}
+        />
+      </div>
+      <div className="analytics-grid">
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.byType")}</h2>
+            <span>{year}</span>
+          </div>
+          <AnalyticsBarList
+            rows={snapshot.byKind.map((row) => ({
+              name: t(LEAVE_KIND_LABEL[row.kind]),
+              days: row.days,
+            }))}
+            empty={t("admin.noApproved")}
+          />
+        </div>
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.byDepartment")}</h2>
+            <span>{year}</span>
+          </div>
+          <AnalyticsBarList
+            rows={snapshot.byDepartment.map((row) => ({
+              name:
+                row.name === "Unassigned" ? t("department.unassigned") : row.name,
+              days: row.days,
+            }))}
+            empty={t("admin.noDepartmentDays")}
+          />
+        </div>
       </div>
       <div className="card chart-card">
         <div className="card-heading">
           <h2>{t("admin.daysByMonth")}</h2>
           <span>{year}</span>
         </div>
-        {daysTaken === 0 ? (
+        {snapshot.daysTaken === 0 ? (
           <div className="table-empty">{t("admin.noApproved")}</div>
         ) : (
           <div className="month-chart" role="img" aria-label={t("admin.daysByMonth")}>
-            {monthDays.map((days, index) => (
+            {snapshot.monthDays.map((days, index) => (
               <div
                 key={`${year}-${index}`}
                 title={`${monthNames[index]}: ${formatDaysLabel(t, days)}`}
@@ -2077,7 +2219,33 @@ function Analytics({
           </div>
         )}
       </div>
-    </>
+      <div className="analytics-grid">
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.onLeaveNow")}</h2>
+            <span>{snapshot.onLeave.length}</span>
+          </div>
+          <AnalyticsPeopleList
+            people={snapshot.onLeave}
+            empty={t("admin.noOneOnLeave")}
+            onOpenEmployee={onOpenEmployee}
+            employees={employeeById}
+          />
+        </div>
+        <div className="card chart-card">
+          <div className="card-heading">
+            <h2>{t("admin.upcomingLeave")}</h2>
+            <span>{snapshot.upcoming.length}</span>
+          </div>
+          <AnalyticsPeopleList
+            people={snapshot.upcoming}
+            empty={t("admin.noUpcoming")}
+            onOpenEmployee={onOpenEmployee}
+            employees={employeeById}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
