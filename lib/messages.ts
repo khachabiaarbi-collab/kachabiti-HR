@@ -620,7 +620,7 @@ export const en = {
   "contract.errorEndBefore": "The end date must be after the effective date.",
   "contract.timeClock": "Time clock",
   "contract.attendanceBased": "Pay according to the time clock",
-  "contract.attendanceOn": "Scheduled days with no punch and no approved leave are deducted, as is missing time beyond the grace period.",
+  "contract.attendanceOn": "Scheduled days with no punch and no approved leave are deducted, as is missing time (counted by the quarter hour, with no tolerance).",
   "contract.attendanceOff": "Pay ignores the time clock (for people who do not punch).",
   "contract.sivpExempt": "SIVP contract: no CNSS, IRPP or CSS.",
   "contract.cnssNotApplicable": "CNSS number: not applicable for an SIVP contract (no CNSS contributions).",
@@ -1019,7 +1019,6 @@ export const en = {
   "att.mixedHint":
     "For one person who is part-time some days and full-time on others: put 5 h work (no Pause) on the short days and 8 h work + a 1 h Pause on the full days. Then assign only that person below.",
   "att.timezone": "Timezone",
-  "att.grace": "Grace period (minutes)",
   "att.maxSessionsLabel": "Maximum sessions",
   "att.weekly": "Weekly schedule",
   "att.weeklyTitle": "Same-day work and break segments",
@@ -1692,7 +1691,7 @@ export const fr: Record<keyof typeof en, string> = {
   "contract.errorEndBefore": "La date de fin doit être postérieure à la date d’effet.",
   "contract.timeClock": "Pointage",
   "contract.attendanceBased": "Payé selon le pointage",
-  "contract.attendanceOn": "Les jours prévus sans pointage ni congé approuvé sont retenus, ainsi que le temps manquant au-delà de la tolérance.",
+  "contract.attendanceOn": "Les jours prévus sans pointage ni congé approuvé sont retenus, ainsi que le temps manquant (compté au quart d’heure, sans tolérance).",
   "contract.attendanceOff": "La paie ne tient pas compte du pointage (pour les personnes qui ne pointent pas).",
   "contract.sivpExempt": "Contrat SIVP : pas de CNSS, d’IRPP ni de CSS.",
   "contract.cnssNotApplicable": "N° CNSS : non applicable pour un contrat SIVP (pas de cotisations CNSS).",
@@ -2091,7 +2090,6 @@ export const fr: Record<keyof typeof en, string> = {
   "att.mixedHint":
     "Pour une personne part-time certains jours et full-time les autres : 5 h de travail (sans Pause) les jours courts, et 8 h + une Pause de 1 h les jours complets. Puis affectez seulement cette personne en bas.",
   "att.timezone": "Fuseau horaire",
-  "att.grace": "Marge (minutes)",
   "att.maxSessionsLabel": "Sessions maximum",
   "att.weekly": "Horaire hebdomadaire",
   "att.weeklyTitle": "Segments de travail et de pause le même jour",

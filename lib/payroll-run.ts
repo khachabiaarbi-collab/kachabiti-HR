@@ -642,7 +642,7 @@ export async function prepareRun(
   }
   if (run.status !== "draft") return { run, missingContract: [] };
 
-  const [contractRows, components, employeeComponents, leaveRows, holidays, existing, attendance, grace] =
+  const [contractRows, components, employeeComponents, leaveRows, holidays, existing, attendance] =
     await Promise.all([
       supabase
         .from("employee_contracts")
@@ -659,7 +659,6 @@ export async function prepareRun(
       loadTunisiaHolidays(year),
       loadPayslips(run.id),
       loadAttendanceMonth(from, to),
-      loadGraceMinutes(),
     ]);
   if (contractRows.error) throw new Error(contractRows.error.message);
   if (leaveRows.error) throw new Error(leaveRows.error.message);
@@ -742,7 +741,8 @@ export async function prepareRun(
           employedTo: contract.contractEnd,
           holidays: holidaySet,
           leave,
-          graceMinutes: grace,
+          // No late tolerance: time counts by the quarter-hour rules.
+          graceMinutes: 0,
           today,
         });
         // Quarter-hour rules (schedule windows, rounded punches, authorizations).
@@ -893,14 +893,6 @@ async function loadAttendanceMonth(from: string, to: string) {
     byEmployee.set(row.employee_id, days);
   }
   return byEmployee;
-}
-
-async function loadGraceMinutes() {
-  const { data } = await createClient()
-    .from("attendance_settings")
-    .select("grace_minutes")
-    .maybeSingle();
-  return Number((data as { grace_minutes?: number } | null)?.grace_minutes) || 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ UTC `timestamptz` values and displayed in Tunis time.
 - Weekday segments: 08:00–12:00 and 13:00–17:00
 - Saturday: 08:00–13:30
 - Normal break: 12:00–13:00
-- Grace period: 5 minutes
+- No late tolerance: time counts by the quarter-hour rules below
 - Maximum sessions: 5 per employee per day
 - Overnight schedule segments are not supported
 
@@ -186,7 +186,8 @@ late arrivals and early departures.
 
 Main tables:
 
-- `attendance_settings`: singleton timezone, grace, and session configuration
+- `attendance_settings`: singleton timezone and session configuration
+  (`grace_minutes` is kept in the table but no longer used)
 - `work_schedules`: schedule templates
 - `work_schedule_segments`: weekday work and break windows
 - `employee_schedule_assignments`: effective-dated employee overrides
