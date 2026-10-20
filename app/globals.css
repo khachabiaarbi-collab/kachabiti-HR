@@ -1337,8 +1337,8 @@ select {
   }
 }
 .people-row {
-  min-width: 1040px;
-  grid-template-columns: 1.35fr 1.25fr 0.8fr 0.85fr 1.65fr 0.4fr;
+  min-width: 980px;
+  grid-template-columns: 1.45fr 1.3fr 0.8fr 0.9fr minmax(150px, 0.9fr) 72px;
 }
 .requests-row {
   min-width: 1080px;
@@ -1428,60 +1428,97 @@ select {
 }
 .leave-balance-list {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   min-width: 0;
 }
-.leave-balance-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 82px;
-  padding: 6px 8px;
-  border: 1px solid #e7e7e3;
-  border-radius: 9px;
-  background: #f8f8f6;
-  color: #6b7280;
-  line-height: 1;
+.leave-balance-cell {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  max-width: 10.5rem;
+  min-width: 0;
 }
-.leave-balance-chip > span {
+.leave-balance-type {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #737373;
   font-size: 10px;
-  font-weight: 500;
-}
-.leave-balance-chip b {
-  color: #111827;
-  font-size: 14px;
   font-weight: 600;
+}
+.leave-balance-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.leave-balance-figure b {
+  color: #171717;
+  font-size: 15px;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
-.leave-balance-chip small {
-  margin-left: 1px;
-  color: #9ca3af;
-  font-size: 9px;
-  font-weight: 500;
+.leave-balance-figure small {
+  color: #a3a3a3;
+  font-size: 11px;
+  font-weight: 600;
 }
-.leave-balance-chip.is-empty {
-  border-color: #f1dfbd;
-  background: #fffbeb;
-  color: #92400e;
+.leave-balance-figure em {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: #477356;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
-.leave-balance-chip.is-empty b,
-.leave-balance-chip.is-empty small {
+.leave-balance-figure em::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.leave-balance-meter {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ececea;
+}
+.leave-balance-meter i {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: #477356;
+}
+.leave-balance-cell.is-empty b,
+.leave-balance-cell.is-empty em {
   color: #b45309;
 }
-.leave-balance-chip.is-negative {
-  border-color: #f0c7c4;
-  background: #fff1f2;
-  color: #9f3128;
+.leave-balance-cell.is-empty .leave-balance-meter {
+  background: #fbeedd;
 }
-.leave-balance-chip.is-negative b,
-.leave-balance-chip.is-negative small {
+.leave-balance-cell.is-empty .leave-balance-meter i {
+  min-width: 0;
+}
+.leave-balance-cell.is-negative b,
+.leave-balance-cell.is-negative em {
   color: #b42318;
+}
+.leave-balance-cell.is-negative .leave-balance-meter {
+  background: repeating-linear-gradient(-45deg, #fde4e2 0 4px, #f8cfcb 4px 8px);
+}
+.leave-balance-cell.is-negative .leave-balance-meter i {
+  min-width: 0;
 }
 .leave-balance-empty {
   color: #9ca3af;
@@ -5620,6 +5657,71 @@ select option {
     transition: none;
   }
 }
+.people-count {
+  margin: -6px 3px 4px;
+  color: #999;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.sort-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.sort-head svg {
+  opacity: 0.45;
+}
+.sort-head:hover,
+.sort-head.is-sorted {
+  color: #171717;
+}
+.sort-head.is-sorted svg {
+  opacity: 1;
+}
+.sort-head:focus-visible {
+  outline: 2px solid #477356;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.people-row.is-inactive .table-member,
+.people-row.is-inactive > span {
+  opacity: 0.55;
+}
+.people-status-tag {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #f0f0ee;
+  color: #737373;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+.people-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 40px 16px;
+  border-top: 1px solid #f0f0ee;
+  color: #737373;
+  font-size: 13px;
+}
+.people-empty p {
+  margin: 0;
+}
+
 /* ===========================================================================
    Design system
    One set of tokens for the whole app. These rules come last on purpose: they

@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   Building2,
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Clock3,
   Palmtree,
   Eye,
@@ -62,8 +65,8 @@ import {
   authorizationMonthKey,
   displayLeaveType,
   displayValue,
-  DEFAULT_MONTHLY_LEAVE_DAYS,
   daysInMonth,
+  DEFAULT_MONTHLY_LEAVE_DAYS,
   employeeBalances,
   firstName,
   formatDisplayDate,
@@ -94,6 +97,7 @@ import {
   deleteEmployeeRecord,
 } from "@/lib/delete-records";
 import {
+  filterOptionLabel,
   formatDaysLabel,
   screenLabel,
   translateRole,
@@ -780,6 +784,15 @@ function Dashboard({
   );
 }
 
+type PeopleSortKey = "name" | "department" | "balance";
+
+/** Matches the states shown in the annual balance column. */
+function balanceKind(days: number | undefined) {
+  if (days === undefined) return "notSet";
+  if (days < 0) return "advance";
+  return days === 0 ? "empty" : "available";
+}
+
 function People({
   employees,
   setEmployees,
@@ -809,11 +822,29 @@ function People({
   currentEmployee: Employee | null;
   flash: (message: string, tone?: "success" | "error") => void;
 }) {
-  const t = useT();
+  const { t, dateLocale } = useLanguage();
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("All");
+  const [role, setRole] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [balanceState, setBalanceState] = useState("All");
+  const [sort, setSort] = useState<{ key: PeopleSortKey; dir: 1 | -1 }>({
+    key: "name",
+    dir: 1,
+  });
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<Employee | null>(null);
+  const annualDays = useMemo(() => {
+    const days = new Map<string, number>();
+    for (const balance of balances) {
+      if (!isAnnualLeaveType({ name: balance.typeName })) continue;
+      days.set(
+        balance.employeeId,
+        (days.get(balance.employeeId) ?? 0) + balance.daysRemaining,
+      );
+    }
+    return days;
+  }, [balances]);
   const filtered = employees.filter(
     (employee) =>
       (
@@ -826,13 +857,67 @@ function People({
       )
         .toLowerCase()
         .includes((query || globalSearch).toLowerCase()) &&
-      (department === "All" || employee.department === department),
+      (department === "All" || employee.department === department) &&
+      (role === "All" || employee.role === role) &&
+      (status === "All" || employee.status === status) &&
+      (balanceState === "All" ||
+        balanceKind(annualDays.get(employee.id)) === balanceState),
   );
-  const paged = paginate(filtered, page);
+  const sorted = [...filtered].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, dateLocale);
+    if (sort.key === "name") return byName * sort.dir;
+    const compared =
+      sort.key === "department"
+        ? a.department.localeCompare(b.department, dateLocale)
+        : (annualDays.get(a.id) ?? Number.NEGATIVE_INFINITY) -
+          (annualDays.get(b.id) ?? Number.NEGATIVE_INFINITY);
+    return compared * sort.dir || byName;
+  });
+  const paged = paginate(sorted, page);
+  const filtersActive =
+    query !== "" ||
+    department !== "All" ||
+    role !== "All" ||
+    status !== "All" ||
+    balanceState !== "All";
+  const resetFilters = () => {
+    setQuery("");
+    setDepartment("All");
+    setRole("All");
+    setStatus("All");
+    setBalanceState("All");
+  };
+  const sortHeader = (key: PeopleSortKey, label: string) => (
+    <button
+      type="button"
+      className={`sort-head${sort.key === key ? " is-sorted" : ""}`}
+      aria-label={t("people.sortBy", { column: label })}
+      onClick={() =>
+        setSort((current) =>
+          current.key === key
+            ? { key, dir: current.dir === 1 ? -1 : 1 }
+            : { key, dir: key === "balance" ? -1 : 1 },
+        )
+      }
+    >
+      {label}
+      {sort.key !== key ? (
+        <ChevronsUpDown size={11} />
+      ) : sort.dir === 1 ? (
+        <ArrowUp size={11} />
+      ) : (
+        <ArrowDown size={11} />
+      )}
+    </button>
+  );
+
+  useEffect(() => {
+    setQuery(globalSearch);
+  }, [globalSearch]);
 
   useEffect(() => {
     setPage(1);
-  }, [query, department, globalSearch]);
+  }, [query, department, role, status, balanceState, sort, globalSearch]);
 
   return (
     <>
@@ -849,8 +934,10 @@ function People({
         <FilterBar
           search={query}
           setSearch={setQuery}
+          onReset={filtersActive ? resetFilters : undefined}
           filters={[
             {
+              label: "Department",
               value: department,
               setValue: setDepartment,
               options: [
@@ -859,17 +946,68 @@ function People({
                   new Set(employees.map((employee) => employee.department)),
                 ),
               ],
+              optionLabel: (option) =>
+                option === "All"
+                  ? t("people.allDepartments")
+                  : filterOptionLabel(t, option),
+            },
+            {
+              label: t("filter.role"),
+              value: role,
+              setValue: setRole,
+              options: ["All", "Administrator", "Manager", "Employee"],
+              optionLabel: (option) =>
+                option === "All" ? t("people.allRoles") : translateRole(t, option),
+            },
+            {
+              label: "Status",
+              value: status,
+              setValue: setStatus,
+              options: ["All", "Active", "Inactive"],
+              optionLabel: (option) =>
+                option === "All"
+                  ? t("people.allStatuses")
+                  : filterOptionLabel(t, option),
+            },
+            {
+              label: t("people.balanceFilter"),
+              value: balanceState,
+              setValue: setBalanceState,
+              options: ["All", "available", "empty", "advance", "notSet"],
+              optionLabel: (option) =>
+                option === "available"
+                  ? t("admin.balanceAvailable")
+                  : option === "empty"
+                    ? t("admin.balanceEmpty")
+                    : option === "advance"
+                      ? t("admin.balanceAdvance")
+                      : option === "notSet"
+                        ? t("admin.notSet")
+                        : t("people.allBalances"),
             },
           ]}
         />
+        {employees.length > 0 && (
+          <p className="people-count">
+            {t("people.count", { shown: filtered.length, total: employees.length })}
+          </p>
+        )}
         {filtered.length > 0 && (
           <div className="employee-row people-row people-head">
-            <span>{t("admin.colEmployee")}</span>
+            {sortHeader("name", t("admin.colEmployee"))}
             <span>{t("admin.colEmail")}</span>
             <span>{t("admin.colPhone")}</span>
-            <span>{t("filter.department")}</span>
-            <span>{t("admin.colVacation")}</span>
+            {sortHeader("department", t("filter.department"))}
+            {sortHeader("balance", t("admin.colVacation"))}
             <span />
+          </div>
+        )}
+        {filtered.length === 0 && employees.length > 0 && (
+          <div className="people-empty">
+            <p>{t("people.noMatch")}</p>
+            <Button secondary onClick={resetFilters}>
+              {t("common.reset")}
+            </Button>
           </div>
         )}
         {paged.items.map((employee) => {
@@ -878,7 +1016,9 @@ function People({
           );
           return (
             <div
-              className="employee-row people-row is-selectable"
+              className={`employee-row people-row is-selectable${
+                employee.status === "Inactive" ? " is-inactive" : ""
+              }`}
               key={employee.id}
               role="button"
               tabIndex={0}
@@ -893,7 +1033,12 @@ function People({
               <div className="table-member">
                 <Avatar e={employee} />
                 <div>
-                  <b>{employee.name}</b>
+                  <b>
+                    {employee.name}
+                    {employee.status === "Inactive" && (
+                      <em className="people-status-tag">{t("status.inactive")}</em>
+                    )}
+                  </b>
                   <span>
                     {translateRole(t, employee.role)}
                     {employee.jobTitle ? ` · ${employee.jobTitle}` : ""}
@@ -911,30 +1056,46 @@ function People({
                 {solde.length === 0 ? (
                   <span className="leave-balance-empty">{t("admin.notSet")}</span>
                 ) : (
-                  solde.map((balance) => (
-                    <span
-                      key={balance.leaveTypeId}
-                      className={`leave-balance-chip ${
-                        balance.daysRemaining < 0
-                          ? "is-negative"
-                          : balance.daysRemaining === 0
-                            ? "is-empty"
-                            : ""
-                      }`}
-                      title={t("admin.balanceTitle", {
-                        type: leaveTypeLabel(t, balance.typeName),
-                        days: balance.daysRemaining,
-                      })}
-                    >
-                      <span>
-                        {leaveTypeLabel(t, balance.typeName)}
-                      </span>
-                      <b>
-                        {balance.daysRemaining}
-                        <small>d</small>
-                      </b>
-                    </span>
-                  ))
+                  solde.map((balance) => {
+                    const days = balance.daysRemaining;
+                    const yearly =
+                      (employee.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS) * 12;
+                    const share =
+                      yearly > 0 ? Math.min(Math.max(days / yearly, 0), 1) : 0;
+                    const tone = days < 0 ? "is-negative" : days === 0 ? "is-empty" : "";
+                    return (
+                      <div
+                        key={balance.leaveTypeId}
+                        className={`leave-balance-cell ${tone}`}
+                        title={`${t("admin.balanceTitle", {
+                          type: leaveTypeLabel(t, balance.typeName),
+                          days: formatLeaveDayCount(days, dateLocale),
+                        })} · ${t("admin.balanceYear", {
+                          days: formatLeaveDayCount(yearly, dateLocale),
+                        })}`}
+                      >
+                        {solde.length > 1 && (
+                          <span className="leave-balance-type">
+                            {leaveTypeLabel(t, balance.typeName)}
+                          </span>
+                        )}
+                        <div className="leave-balance-figure">
+                          <b>{formatLeaveDayCount(days, dateLocale, 2)}</b>
+                          <small>{t("panel.daysShort")}</small>
+                          <em>
+                            {days < 0
+                              ? t("admin.balanceAdvance")
+                              : days === 0
+                                ? t("admin.balanceEmpty")
+                                : t("admin.balanceAvailable")}
+                          </em>
+                        </div>
+                        <span className="leave-balance-meter" aria-hidden="true">
+                          <i style={{ width: `${share * 100}%` }} />
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
               <div className="row-actions">
