@@ -362,6 +362,32 @@ export const en = {
   "admin.noDepartments": "No departments yet. Add them from the Departments page.",
   "admin.deptRow": "{count} people · {manager}",
   "admin.policyDays": "{days} days",
+  "admin.companyHint": "Name used across the workspace",
+  "admin.companyIntro":
+    "This is the company this workspace belongs to. The name and branding stay fixed.",
+  "admin.leaveHint": "Default allowance for each type",
+  "admin.leaveIntro":
+    "Employees choose from this catalog when they request leave. The figure is the default allowance; each person’s balance is set on their record.",
+  "admin.attendanceHint": "Hours, sessions, and punch sites",
+  "admin.attendanceIntro":
+    "Choose a schedule, set the weekly hours, then say who follows it. Punch sites are saved on their own.",
+  "admin.departmentsHint": "Teams and who leads them",
+  "admin.departmentsIntro":
+    "Departments group people for leave and reports. Add or rename them on the Departments page.",
+  "admin.rolesHint": "What each role can open",
+  "admin.rolesIntro":
+    "A person’s role is set on their employee record. It decides which screens they see.",
+  "admin.roleAdminTitle": "Administrator",
+  "admin.roleAdminBody":
+    "Opens every screen, including payroll, people, and these settings.",
+  "admin.roleManagerTitle": "Manager",
+  "admin.roleManagerBody":
+    "Reviews team leave and attendance. Payroll stays with administrators.",
+  "admin.roleEmployeeTitle": "Employee",
+  "admin.roleEmployeeBody":
+    "Requests leave, punches in, and sees their own balance and payslips.",
+  "admin.deptPeople": "{count} people",
+  "admin.managedBy": "Led by {manager}",
 
   "cal.mon": "Mon",
   "cal.tue": "Tue",
@@ -877,8 +903,22 @@ export const en = {
   "att.settingsLoading": "Loading attendance settings…",
   "att.noSchedule": "No work schedule is configured.",
   "att.scheduleName": "Name",
+  "att.scheduleNote":
+    "Everyone uses the default schedule unless you assign them another one below.",
+  "att.rules": "Clock rules",
+  "att.rulesNote":
+    "These rules apply to every schedule. Saving the schedule also saves them.",
+  "att.maxSessionsHelp": "How many in-and-out pairs one day can include.",
+  "att.timezoneHelp": "Punches are read in this timezone.",
   "att.columnDay": "Day",
   "att.columnKind": "Type",
+  "att.columnStart": "Starts",
+  "att.columnEnd": "Ends",
+  "att.assignPerson": "Person",
+  "att.assignFrom": "From",
+  "att.assignUntil": "Until",
+  "att.saveNote":
+    "Saves this schedule, its hours, who is assigned, and the clock rules. Punch sites use their own button.",
   "att.newSchedule": "New schedule",
   "att.newScheduleName": "Part-time",
   "att.mixedHint":
@@ -899,7 +939,7 @@ export const en = {
   "att.addAssignment": "Add assignment",
   "att.noOverrides": "No overrides. Employees use the company default schedule.",
   "att.scheduleSaved": "Attendance schedule saved",
-  "att.saveSettings": "Save attendance settings",
+  "att.saveSettings": "Save schedule and rules",
   "att.defaultSuffix": " (default)",
   "att.correctionTitle": "Request a correction",
   "att.correctionBody":
@@ -1299,6 +1339,32 @@ export const fr: Record<keyof typeof en, string> = {
   "admin.noDepartments": "Aucun département. Ajoutez-les depuis la page Départements.",
   "admin.deptRow": "{count} personnes · {manager}",
   "admin.policyDays": "{days} jours",
+  "admin.companyHint": "Nom utilisé dans l’espace",
+  "admin.companyIntro":
+    "C’est l’entreprise de cet espace. Le nom et l’identité restent fixes.",
+  "admin.leaveHint": "Droit par défaut de chaque type",
+  "admin.leaveIntro":
+    "Les employés choisissent dans ce catalogue pour demander un congé. Le chiffre est le droit par défaut ; le solde de chacun se règle sur sa fiche.",
+  "admin.attendanceHint": "Horaires, sessions et sites de pointage",
+  "admin.attendanceIntro":
+    "Choisissez un horaire, réglez les heures de la semaine, puis indiquez qui le suit. Les sites de pointage s’enregistrent à part.",
+  "admin.departmentsHint": "Équipes et leurs responsables",
+  "admin.departmentsIntro":
+    "Les départements regroupent les personnes pour les congés et les rapports. Ajoutez-les ou renommez-les depuis la page Départements.",
+  "admin.rolesHint": "Ce que chaque rôle peut ouvrir",
+  "admin.rolesIntro":
+    "Le rôle se choisit sur la fiche de l’employé. Il décide des écrans visibles.",
+  "admin.roleAdminTitle": "Administrateur",
+  "admin.roleAdminBody":
+    "Ouvre tous les écrans, y compris la paie, les personnes et ces paramètres.",
+  "admin.roleManagerTitle": "Manager",
+  "admin.roleManagerBody":
+    "Valide les congés et la présence de l’équipe. La paie reste réservée aux administrateurs.",
+  "admin.roleEmployeeTitle": "Employé",
+  "admin.roleEmployeeBody":
+    "Demande des congés, pointe, et consulte son solde et ses fiches de paie.",
+  "admin.deptPeople": "{count} personnes",
+  "admin.managedBy": "Responsable : {manager}",
 
   "cal.mon": "Lun",
   "cal.tue": "Mar",
@@ -1814,8 +1880,22 @@ export const fr: Record<keyof typeof en, string> = {
   "att.settingsLoading": "Chargement des paramètres de présence…",
   "att.noSchedule": "Aucun horaire n’est configuré.",
   "att.scheduleName": "Nom",
+  "att.scheduleNote":
+    "Tout le monde suit l’horaire par défaut, sauf les personnes affectées à un autre horaire plus bas.",
+  "att.rules": "Règles de pointage",
+  "att.rulesNote":
+    "Ces règles valent pour tous les horaires. Les enregistrer se fait avec l’horaire.",
+  "att.maxSessionsHelp": "Nombre d’allers-retours autorisés dans une journée.",
+  "att.timezoneHelp": "Les pointages sont lus dans ce fuseau.",
   "att.columnDay": "Jour",
   "att.columnKind": "Type",
+  "att.columnStart": "Début",
+  "att.columnEnd": "Fin",
+  "att.assignPerson": "Personne",
+  "att.assignFrom": "Du",
+  "att.assignUntil": "Au",
+  "att.saveNote":
+    "Enregistre cet horaire, ses heures, les affectations et les règles de pointage. Les sites ont leur propre bouton.",
   "att.newSchedule": "Nouvel horaire",
   "att.newScheduleName": "Temps partiel",
   "att.mixedHint":
@@ -1836,7 +1916,7 @@ export const fr: Record<keyof typeof en, string> = {
   "att.addAssignment": "Ajouter une affectation",
   "att.noOverrides": "Aucune exception. Les employés utilisent l’horaire par défaut.",
   "att.scheduleSaved": "Horaire de présence enregistré",
-  "att.saveSettings": "Enregistrer les paramètres",
+  "att.saveSettings": "Enregistrer l’horaire et les règles",
   "att.defaultSuffix": " (par défaut)",
   "att.correctionTitle": "Demander une correction",
   "att.correctionBody":

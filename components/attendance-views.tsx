@@ -1832,96 +1832,111 @@ export function AttendanceScheduleSettings({
 
   return (
     <div className="attendance-settings-editor">
-      <div className="schedule-picker">
-        <label className="form-label">
-          {t("att.schedule")}
-          <select value={selectedId} onChange={(event) => selectSchedule(event.target.value)}>
-            {schedules.map((schedule) => (
-              <option key={schedule.id} value={schedule.id}>
-                {schedule.name}
-                {schedule.isDefault ? t("att.defaultSuffix") : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="form-label">
-          {t("att.scheduleName")}
-          <input
-            value={draft.name}
-            onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <button type="button" className="secondary-button" onClick={startNewSchedule}>
-          <Plus size={14} /> {t("att.newSchedule")}
-        </button>
-      </div>
+      <section className="settings-block">
+        <header>
+          <h3>{t("att.schedule")}</h3>
+          <p>{t("att.scheduleNote")}</p>
+        </header>
+        <div className="schedule-picker">
+          <label className="form-label">
+            {t("att.schedule")}
+            <ModernSelect
+              block
+              ariaLabel={t("att.schedule")}
+              value={selectedId}
+              onChange={selectSchedule}
+              options={schedules.map((schedule) => ({
+                value: schedule.id,
+                label: `${schedule.name}${schedule.isDefault ? t("att.defaultSuffix") : ""}`,
+              }))}
+            />
+          </label>
+          <label className="form-label">
+            {t("att.scheduleName")}
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+          </label>
+          <button type="button" className="secondary-button" onClick={startNewSchedule}>
+            <Plus size={14} /> {t("att.newSchedule")}
+          </button>
+        </div>
+      </section>
 
-      <div className="attendance-settings-grid">
-        <label className="form-label">
-          {t("att.timezone")}
-          <input value={settings.timezone} readOnly />
-        </label>
-        <label className="form-label">
-          {t("att.grace")}
-          <input
-            type="number"
-            min={0}
-            max={120}
-            value={settings.graceMinutes}
-            onChange={(event) =>
-              setSettings({ ...settings, graceMinutes: Number(event.target.value) })
-            }
-          />
-        </label>
-        <label className="form-label">
-          {t("att.maxSessionsLabel")}
-          <input
-            type="number"
-            min={1}
-            max={5}
-            value={settings.maxSessions}
-            onChange={(event) =>
-              setSettings({ ...settings, maxSessions: Number(event.target.value) })
-            }
-          />
-        </label>
-      </div>
+      <section className="settings-block">
+        <header>
+          <h3>{t("att.rules")}</h3>
+          <p>{t("att.rulesNote")}</p>
+        </header>
+        <div className="attendance-settings-grid">
+          <label className="form-label">
+            {t("att.timezone")}
+            <input value={settings.timezone} readOnly />
+            <small className="field-help">{t("att.timezoneHelp")}</small>
+          </label>
+          <label className="form-label">
+            {t("att.maxSessionsLabel")}
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={settings.maxSessions}
+              onChange={(event) =>
+                setSettings({ ...settings, maxSessions: Number(event.target.value) })
+              }
+            />
+            <small className="field-help">{t("att.maxSessionsHelp")}</small>
+          </label>
+        </div>
+      </section>
 
+      <section className="settings-block">
       <div className="schedule-editor-head">
         <div>
-          <p className="eyebrow">{t("att.weekly")}</p>
           <h3>{t("att.weeklyTitle")}</h3>
           <p className="page-subtitle">{t("att.breakHint")}</p>
         </div>
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() =>
-            setDraft({
-              ...draft,
-              segments: [
-                ...draft.segments,
-                {
-                  isoWeekday: 1,
-                  kind: "work",
-                  startTime: "08:00",
-                  endTime: "17:00",
-                  position: draft.segments.length + 1,
-                },
-              ],
-            })
-          }
-        >
-          <Plus size={14} /> {t("att.addSegment")}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={!copiedSegment}
-          onClick={() => void pasteSegment(draft.segments.length - 1)}
-        >
-          <ClipboardPaste size={14} /> {t("att.pasteSegment")}
-        </button>
+        <div className="settings-block-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() =>
+              setDraft({
+                ...draft,
+                segments: [
+                  ...draft.segments,
+                  {
+                    isoWeekday: 1,
+                    kind: "work",
+                    startTime: "08:00",
+                    endTime: "17:00",
+                    position: draft.segments.length + 1,
+                  },
+                ],
+              })
+            }
+          >
+            <Plus size={14} /> {t("att.addSegment")}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!copiedSegment}
+            onClick={() => void pasteSegment(draft.segments.length - 1)}
+          >
+            <ClipboardPaste size={14} /> {t("att.pasteSegment")}
+          </button>
+        </div>
+      </div>
+      <div className="schedule-segment-head" aria-hidden="true">
+        <span />
+        <span>{t("att.columnDay")}</span>
+        <span>{t("att.columnKind")}</span>
+        <span>{t("att.columnStart")}</span>
+        <span />
+        <span>{t("att.columnEnd")}</span>
+        <span />
       </div>
       <div className="schedule-segment-list">
         {draft.segments.map((segment, index) => (
@@ -1975,12 +1990,14 @@ export function AttendanceScheduleSettings({
             />
             <input
               type="time"
+              aria-label={t("att.columnStart")}
               value={segment.startTime.slice(0, 5)}
               onChange={(event) => updateSegment(index, "startTime", event.target.value)}
             />
             <span>{t("att.segmentTo")}</span>
             <input
               type="time"
+              aria-label={t("att.columnEnd")}
               value={segment.endTime.slice(0, 5)}
               onChange={(event) => updateSegment(index, "endTime", event.target.value)}
             />
@@ -2016,6 +2033,7 @@ export function AttendanceScheduleSettings({
           </div>
         ))}
       </div>
+      </section>
 
       <ScheduleAssignments
         assignments={draft.assignments ?? []}
@@ -2043,7 +2061,7 @@ function ScheduleAssignments({
 }) {
   const t = useT();
   return (
-    <div className="schedule-assignment-editor">
+    <section className="settings-block schedule-assignment-editor">
       <div className="schedule-editor-head">
         <div>
           <p className="eyebrow">{t("att.overrides")}</p>
@@ -2070,45 +2088,52 @@ function ScheduleAssignments({
       </div>
       {assignments.map((assignment, index) => (
         <div className="schedule-assignment-row" key={assignment.id ?? index}>
-          <select
-            value={assignment.employeeId}
-            onChange={(event) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index
-                    ? { ...item, employeeId: event.target.value }
-                    : item,
-                ),
-              )
-            }
-          >
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
-          <DatePicker
-            value={assignment.effectiveFrom}
-            onChange={(value) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index ? { ...item, effectiveFrom: value } : item,
-                ),
-              )
-            }
-          />
-          <DatePicker
-            value={assignment.effectiveTo ?? ""}
-            min={assignment.effectiveFrom || undefined}
-            onChange={(value) =>
-              onChange(
-                assignments.map((item, itemIndex) =>
-                  itemIndex === index ? { ...item, effectiveTo: value || null } : item,
-                ),
-              )
-            }
-          />
+          <label>
+            <span>{t("att.assignPerson")}</span>
+            <ModernSelect
+              block
+              ariaLabel={t("att.assignPerson")}
+              value={assignment.employeeId}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, employeeId: value } : item,
+                  ),
+                )
+              }
+              options={employees.map((employee) => ({
+                value: employee.id,
+                label: employee.name,
+              }))}
+            />
+          </label>
+          <label>
+            <span>{t("att.assignFrom")}</span>
+            <DatePicker
+              value={assignment.effectiveFrom}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, effectiveFrom: value } : item,
+                  ),
+                )
+              }
+            />
+          </label>
+          <label>
+            <span>{t("att.assignUntil")}</span>
+            <DatePicker
+              value={assignment.effectiveTo ?? ""}
+              min={assignment.effectiveFrom || undefined}
+              onChange={(value) =>
+                onChange(
+                  assignments.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, effectiveTo: value || null } : item,
+                  ),
+                )
+              }
+            />
+          </label>
           <button
             type="button"
             aria-label={t("att.removeAssignment")}
@@ -2125,7 +2150,7 @@ function ScheduleAssignments({
           {t("att.noOverrides")}
         </p>
       )}
-    </div>
+    </section>
   );
 }
 

@@ -33,7 +33,6 @@ import type {
 import {
   Avatar,
   Button,
-  Field,
   FilterBar,
   Header,
   ModernSelect,
@@ -2096,14 +2095,43 @@ function SettingsView({
   const t = useT();
   const [tab, setTab] = useState("Company Profile");
   const settingsTabs = [
-    { id: "Company Profile", label: t("admin.companyProfile") },
-    { id: "Leave Policy", label: t("admin.leavePolicy") },
-    { id: "Attendance", label: t("nav.attendance") },
-    { id: "Departments", label: screenLabel(t, "Departments") },
-    { id: "Roles & Permissions", label: t("admin.roles") },
+    {
+      id: "Company Profile",
+      label: t("admin.companyProfile"),
+      hint: t("admin.companyHint"),
+      intro: t("admin.companyIntro"),
+      icon: Building2,
+    },
+    {
+      id: "Leave Policy",
+      label: t("admin.leavePolicy"),
+      hint: t("admin.leaveHint"),
+      intro: t("admin.leaveIntro"),
+      icon: Palmtree,
+    },
+    {
+      id: "Attendance",
+      label: t("nav.attendance"),
+      hint: t("admin.attendanceHint"),
+      intro: t("admin.attendanceIntro"),
+      icon: Clock3,
+    },
+    {
+      id: "Departments",
+      label: screenLabel(t, "Departments"),
+      hint: t("admin.departmentsHint"),
+      intro: t("admin.departmentsIntro"),
+      icon: Users,
+    },
+    {
+      id: "Roles & Permissions",
+      label: t("admin.roles"),
+      hint: t("admin.rolesHint"),
+      intro: t("admin.rolesIntro"),
+      icon: ShieldCheck,
+    },
   ];
-  const tabLabel =
-    settingsTabs.find((item) => item.id === tab)?.label ?? tab;
+  const current = settingsTabs.find((item) => item.id === tab) ?? settingsTabs[0];
 
   return (
     <>
@@ -2113,71 +2141,101 @@ function SettingsView({
         action={null}
       />
       <div className="card settings-card">
-        <nav className="settings-nav">
-          {settingsTabs.map((item) => (
-            <button
-              className={tab === item.id ? "active" : ""}
-              key={item.id}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <nav className="settings-nav" aria-label={screenLabel(t, "Settings")}>
+          {settingsTabs.map((item) => {
+            const Icon = item.icon;
+            const selected = tab === item.id;
+            return (
+              <button
+                className={selected ? "active" : ""}
+                key={item.id}
+                type="button"
+                aria-current={selected ? "page" : undefined}
+                onClick={() => setTab(item.id)}
+              >
+                <Icon size={16} />
+                <span>
+                  {item.label}
+                  <small>{item.hint}</small>
+                </span>
+              </button>
+            );
+          })}
         </nav>
         <div className="settings-form">
-          <p className="eyebrow">{t("admin.configuration")}</p>
-          <h2>{tabLabel}</h2>
+          <div className="settings-panel-head">
+            <h2>{current.label}</h2>
+            <p>{current.intro}</p>
+          </div>
           {tab === "Company Profile" && (
-            <>
-              <Field label={t("admin.companyName")} value="Kachabiti" readOnly />
-              <p className="page-subtitle">{t("admin.brandingFixed")}</p>
-            </>
+            <div className="settings-identity">
+              <span className="settings-identity-mark" aria-hidden="true">
+                K
+              </span>
+              <div>
+                <p className="eyebrow">{t("admin.companyName")}</p>
+                <h3>Kachabiti</h3>
+                <p>{t("admin.brandingFixed")}</p>
+              </div>
+            </div>
           )}
           {tab === "Leave Policy" &&
             (leaveTypes.length === 0 ? (
-              <p className="page-subtitle">{t("admin.noLeaveTypes")}</p>
+              <p className="settings-empty">{t("admin.noLeaveTypes")}</p>
             ) : (
-              leaveTypes.map((type) => (
-                <Field
-                  key={type.id}
-                  label={leaveTypeLabel(t, type.name)}
-                  value={t("admin.policyDays", { days: type.defaultDays })}
-                  readOnly
-                />
-              ))
+              <ul className="settings-list">
+                {leaveTypes.map((type) => (
+                  <li key={type.id}>
+                    <b>{leaveTypeLabel(t, type.name)}</b>
+                    <em>{t("admin.policyDays", { days: type.defaultDays })}</em>
+                  </li>
+                ))}
+              </ul>
             ))}
           {tab === "Attendance" && (
             <AttendanceScheduleSettings employees={employees} flash={flash} />
           )}
-          {tab === "Roles & Permissions" &&
-            [
-              t("admin.roleAdmin"),
-              t("admin.roleManager"),
-              t("admin.roleEmployee"),
-            ].map((item) => (
-              <div className="permission-row" key={item}>
-                <ShieldCheck size={16} />
-                {item}
-              </div>
-            ))}
+          {tab === "Roles & Permissions" && (
+            <div className="settings-roles">
+              {(
+                [
+                  ["admin.roleAdminTitle", "admin.roleAdminBody"],
+                  ["admin.roleManagerTitle", "admin.roleManagerBody"],
+                  ["admin.roleEmployeeTitle", "admin.roleEmployeeBody"],
+                ] as const
+              ).map(([title, body]) => (
+                <article className="settings-role" key={title}>
+                  <ShieldCheck size={16} />
+                  <div>
+                    <h3>{t(title)}</h3>
+                    <p>{t(body)}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
           {tab === "Departments" &&
             (departments.length === 0 ? (
-              <p className="page-subtitle">{t("admin.noDepartments")}</p>
+              <p className="settings-empty">{t("admin.noDepartments")}</p>
             ) : (
-              departments.map((department) => (
-                <Field
-                  key={department.id}
-                  label={department.name}
-                  value={t("admin.deptRow", {
-                    count: department.count,
-                    manager:
-                      department.manager === "Unassigned"
-                        ? t("department.unassigned")
-                        : department.manager,
-                  })}
-                  readOnly
-                />
-              ))
+              <ul className="settings-list">
+                {departments.map((department) => (
+                  <li key={department.id}>
+                    <div>
+                      <b>{department.name}</b>
+                      <span>
+                        {t("admin.managedBy", {
+                          manager:
+                            department.manager === "Unassigned"
+                              ? t("department.unassigned")
+                              : department.manager,
+                        })}
+                      </span>
+                    </div>
+                    <em>{t("admin.deptPeople", { count: department.count })}</em>
+                  </li>
+                ))}
+              </ul>
             ))}
         </div>
       </div>
