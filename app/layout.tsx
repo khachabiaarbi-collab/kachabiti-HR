@@ -8,7 +8,7 @@ import './globals.css'
 const sans = Geist({ subsets: ['latin'], variable: '--font-geist', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'Kachabiti | Leave management for modern teams',
+  title: 'RHFlow | Leave management for modern teams',
   description: 'A simple, thoughtful way to manage time off, approvals, and team availability.',
   generator: 'v0.app',
 }

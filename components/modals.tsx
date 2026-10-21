@@ -12,7 +12,7 @@ import type {
 } from "@/lib/app-types";
 import { EmployeeAttendance } from "@/components/attendance-views";
 import { ContractSection, EmployeePayslips } from "@/components/payroll-views";
-import { Avatar, Button, Field, ModernSelect, Status } from "@/components/primitives";
+import { Avatar, Button, Field, ModernSelect, Status, useCompany } from "@/components/primitives";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -296,10 +296,12 @@ export function RequestModal({
             options={
               leaveTypes.length === 0
                 ? [{ value: "", label: t("modal.noTypes") }]
-                : leaveTypes.map((type) => ({
-                    value: type.id,
-                    label: leaveTypeLabel(t, type.name),
-                  }))
+                : leaveTypes
+                    .filter((type) => type.active !== false || type.id === leaveTypeId)
+                    .map((type) => ({
+                      value: type.id,
+                      label: leaveTypeLabel(t, type.name),
+                    }))
             }
           />
         </label>
@@ -755,8 +757,9 @@ export function EmployeeModal({
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [startDate, setStartDate] = useState("");
+  const company = useCompany();
   const [monthlyLeaveDays, setMonthlyLeaveDays] = useState(
-    String(DEFAULT_MONTHLY_LEAVE_DAYS),
+    String(company?.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS),
   );
   const [role, setRole] = useState("Employee");
   const [saving, setSaving] = useState(false);

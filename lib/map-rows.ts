@@ -1,5 +1,6 @@
 import type {
   Authorization,
+  Company,
   CompanyEvent,
   Department,
   Employee,
@@ -406,6 +407,7 @@ export type LeaveTypeRow = {
   name: string;
   default_days: number;
   code?: string | null;
+  active?: boolean | null;
 };
 
 export function mapLeaveType(row: LeaveTypeRow): LeaveType {
@@ -414,6 +416,7 @@ export function mapLeaveType(row: LeaveTypeRow): LeaveType {
     name: row.name,
     defaultDays: Number(row.default_days) || 0,
     code: row.code ?? null,
+    active: row.active ?? true,
   };
 }
 
@@ -644,6 +647,25 @@ export function mapEvent(row: EventRow): CompanyEvent {
     startDate: row.start_date,
     endDate: row.end_date,
     type: row.type,
+  };
+}
+
+export type CompanyRow = {
+  id: string;
+  name: string;
+  logo_url?: string | null;
+  brand_color?: string | null;
+  monthly_leave_days?: number | string | null;
+};
+
+export function mapCompany(row: CompanyRow): Company {
+  const rate = Number(row.monthly_leave_days);
+  return {
+    id: row.id,
+    name: row.name,
+    logoUrl: row.logo_url ?? null,
+    brandColor: row.brand_color ?? null,
+    monthlyLeaveDays: Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_MONTHLY_LEAVE_DAYS,
   };
 }
 

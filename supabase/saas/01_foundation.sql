@@ -384,10 +384,14 @@ begin
   if tg_op = 'UPDATE' then
     new.organization_id := old.organization_id;
   end if;
-  if tg_table_name = 'departments' and new.manager_id is not null then
-    select organization_id into manager_org from public.employees where id = new.manager_id;
-    if manager_org is distinct from new.organization_id then
-      raise exception 'This manager belongs to another company.' using errcode = '42501';
+  -- Nested: PL/pgSQL may evaluate new.manager_id even when the table check
+  -- is false, and leave_types / events have no such column.
+  if tg_table_name = 'departments' then
+    if new.manager_id is not null then
+      select organization_id into manager_org from public.employees where id = new.manager_id;
+      if manager_org is distinct from new.organization_id then
+        raise exception 'This manager belongs to another company.' using errcode = '42501';
+      end if;
     end if;
   end if;
   return new;

@@ -10,8 +10,8 @@ production.
 |---|---|---|
 | 1 | Companies, company on core tables, RLS, new-user trigger | **done** |
 | 2 | Company on attendance, authorizations, payroll, notifications, storage | **done** |
-| 3 | Per-company settings: name, logo, colors, CNSS / tax id, timezone, leave and payroll rules | next |
-| 4 | Roles and permissions per company (owner, admin, HR, manager, employee) | |
+| 3 | Per-company settings: name, logo, colors, CNSS / tax id, timezone, leave and payroll rules | **done** (timezone deferred) |
+| 4 | Roles and permissions per company (owner, admin, HR, manager, employee) | next |
 | 5 | Sign-up "Create my company", setup wizard, employee import | |
 | 6 | KAN super-admin console (customers, suspend, usage) | |
 | 7 | Plans, trial and billing | |
@@ -99,11 +99,64 @@ until `01_foundation.sql` has run. Re-running any of them is still safe.
   `attendance.sql`; on a re-run it would have overwritten every company's
   Saturday hours. New companies get Saturday in their default week.
 
+## Step 3: what exists
+
+[`supabase/saas/03_company_settings.sql`](supabase/saas/03_company_settings.sql):
+
+- `organizations` gets `logo_url`, `brand_color` (`#rrggbb`) and
+  `monthly_leave_days` (vacation earned per month, 1.5 by default).
+- Admins edit their company's name, logo, colour and leave rate; the
+  `organizations_guard` trigger keeps its status, slug and id (suspending a
+  company stays with the service role, step 6).
+- New employees start with their company's rate (`employees_company_leave_rate`;
+  the column default on `employees.monthly_leave_days` is removed).
+- Public `company-logos` bucket; the app uploads with the service role
+  under `<company id>/logo.<ext>`.
+- Leave catalog per company: `leave_types.active`, and the
+  `leave_types_policy_guard` trigger. Built-in types (codes `VACATION`,
+  `ANNUAL`, `SICK`, `PARENTAL`, `UNPAID`) drive vacation earning and payroll:
+  they can be renamed and get new default days, but keep their code, stay
+  active and cannot be deleted. A type used by a leave request cannot be
+  deleted (make it inactive instead).
+
+App:
+
+- Settings → Company Profile (admins edit, managers read):
+  `lib/company-profile.ts` (server actions), `lib/company-profile-file.ts`
+  (checks and colours, tested in `company-profile.test.ts`).
+- Settings → Leave Policy (admins edit, managers read): add, rename, change
+  default days, deactivate, delete (`lib/leave-policy.ts`,
+  `lib/leave-policy-file.ts`, tested in `leave-policy.test.ts`). A new type
+  gives every current employee its default days; changing the default only
+  affects people invited afterwards. Custom types get a `CUSTOM_…` code and
+  cannot use a name the app reads as annual, sick, parental or unpaid leave.
+  Inactive types are hidden from the leave request form.
+- The workspace loads the company with everything else (`loadWorkspace` in
+  `app/page.tsx`) and shares it through `CompanyContext`
+  (`components/primitives.tsx`): logo and name in the menus, payslip
+  header, invite form's default leave rate.
+- Brand colour: main buttons and logo marks always; the design system's
+  accent colour (links, active menu) only when the colour is readable on
+  white, otherwise it stays the default blue (`brandTheme`).
+- Before sign-in there is no company: the product name **RHFlow** is shown.
+- Employer details for payslips (address, matricule fiscal, CNSS number)
+  stay in Payroll → Rates & bonuses (`payroll_company`, per company since
+  step 2).
+
+Fixed in step 3: `company_row_guard` (`01_foundation.sql`) failed on every
+edit of a leave type or event; re-run `01_foundation.sql` on databases set
+up before.
+
+Deferred from step 3:
+
+- Timezone: every attendance and payroll function, and the Tunisian payroll
+  rules, assume `Africa/Tunis` (`attendance_settings` only allows it).
+- A logo for RHFlow itself (the sign-in screen shows a letter mark).
+
 Still open (later steps):
 
 - Avatars are in a public bucket: a photo URL works for anyone who has it
   (the path is the employee id).
-- The UI still says "Kachabiti" (titles, logo, payslip fallback): step 3.
 - Yearly payroll rates are copied per company; a shared, centrally verified
   set could replace them later.
 
@@ -119,15 +172,18 @@ Still open (later steps):
    7. `supabase/work_locations.sql`
    8. `supabase/solde_advance.sql`, `supabase/authorization_solde.sql`
    9. `supabase/employee_avatars.sql`, `supabase/leave_attachments.sql`
+   10. `supabase/saas/03_company_settings.sql`
 
    Do **not** run `handle_new_user.sql` or `leave_types.sql`: they are for
    single-company databases and now stop with an error on a company
    database.
    On a project set up before step 2, run the same list again in the same
    order: the scripts migrate what is there.
-2. Run `supabase/saas/tests/01_isolation.sql`, then
-   `supabase/saas/tests/02_isolation.sql`. They must end with
-   `All isolation checks passed` and `All step 2 isolation checks passed`.
+2. Run `supabase/saas/tests/01_isolation.sql`,
+   `supabase/saas/tests/02_isolation.sql` and
+   `supabase/saas/tests/03_isolation.sql`. They must end with
+   `All isolation checks passed`, `All step 2 isolation checks passed` and
+   `All step 3 checks passed`.
    Each runs in a transaction that is rolled back, so it leaves nothing
    behind.
 3. Authentication → Users → Add user (email + password, auto-confirm), then
@@ -147,6 +203,6 @@ Still open (later steps):
 current rows go to one company named `Kachabiti` (constant
 `existing_company` in the script). With a backup, run the whole list from
 "Setting up `rhflow-dev`" step 1 in order (the feature scripts move
-attendance and payroll data to that company), then both isolation tests.
+attendance and payroll data to that company), then the isolation tests.
 Deploy the app from this branch at the same time: it saves employer details
 per company.

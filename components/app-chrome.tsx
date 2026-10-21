@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import type { Employee, LeaveRequest, Notice, Role } from "@/lib/app-types";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { Avatar, Logo } from "@/components/primitives";
+import { Avatar, CompanyMark, Logo, PRODUCT_NAME, useCompany } from "@/components/primitives";
 import {
   formatRelativeTime,
   screenLabel,
@@ -102,6 +102,7 @@ export function Sidebar({
   showPayroll?: boolean;
 }) {
   const t = useLanguage().t;
+  const company = useCompany();
   const go = (label: string) => {
     setActive(label);
     onCloseMobile?.();
@@ -147,9 +148,12 @@ export function Sidebar({
         <ShieldCheck size={14} /> {t("chrome.adminWorkspace")}
       </div>
       <div className="workspace-switcher">
-        <div className="workspace-icon">K</div>
+        <CompanyMark
+          company={company ?? { name: PRODUCT_NAME, logoUrl: null }}
+          className="workspace-icon"
+        />
         <div>
-          <p className="workspace-name">{t("chrome.workspaceName")}</p>
+          <p className="workspace-name">{company?.name ?? PRODUCT_NAME}</p>
           <p className="workspace-subtitle">{t("chrome.workspaceSubtitle")}</p>
         </div>
         {/* <ChevronDown size={15} className="ml-auto" /> */}

@@ -125,6 +125,14 @@ begin
     raise exception 'ISOLATION FAILED: a new department did not get company A automatically';
   end if;
 
+  -- Editing company rows works (guard triggers on events and leave types).
+  insert into public.events (title, start_date, end_date) values ('A party', current_date, current_date);
+  update public.events set title = 'A party (moved)' where title = 'A party';
+  update public.leave_types set default_days = default_days where organization_id = org_a;
+  if not exists (select 1 from public.events where title = 'A party (moved)') then
+    raise exception 'ISOLATION FAILED: admin A could not edit their own event';
+  end if;
+
   update public.employees set organization_id = org_b
   where id = '00000000-0000-4000-8000-00000000a002';
   if (select organization_id from public.employees where id = '00000000-0000-4000-8000-00000000a002') is distinct from org_a then

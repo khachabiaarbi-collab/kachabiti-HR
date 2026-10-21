@@ -92,6 +92,8 @@ export type LeaveType = {
   name: string;
   defaultDays: number;
   code?: string | null;
+  /** False once an admin deactivates it: kept for history, not requestable. */
+  active?: boolean;
 };
 
 export type CompanyEvent = {
@@ -100,6 +102,15 @@ export type CompanyEvent = {
   startDate: string;
   endDate: string;
   type: string;
+};
+
+/** The signed-in user's company (organizations row). */
+export type Company = {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  brandColor: string | null;
+  monthlyLeaveDays: number;
 };
 
 export type ModalKind = "request" | "authorization" | "event" | "department" | "employee";

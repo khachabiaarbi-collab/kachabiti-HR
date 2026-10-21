@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { usePathname } from "next/navigation";
 import { AlertCircle, Check, ChevronRight, Loader2, Menu, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -16,11 +16,13 @@ import {
   AuthorizationModal,
   RequestModal,
 } from "@/components/modals";
-import { Logo } from "@/components/primitives";
+import { CompanyContext, Logo } from "@/components/primitives";
+import { brandTheme } from "@/lib/company-profile-file";
 import { screenLabel, translateRole, useT } from "@/lib/i18n";
 import { useVacationBalances } from "@/lib/use-leave-hours";
 import type {
   Authorization,
+  Company,
   CompanyEvent,
   Department,
   Employee,
@@ -34,6 +36,7 @@ import type {
 } from "@/lib/app-types";
 import {
   mapAuthorization,
+  mapCompany,
   mapDepartment,
   mapEmployee,
   mapEvent,
@@ -44,6 +47,7 @@ import {
   mapNotice,
   toUiRole,
   type AuthorizationRow,
+  type CompanyRow,
   type DepartmentRow,
   type EmployeeRow,
   type EventRow,
@@ -97,6 +101,7 @@ async function loadWorkspace() {
     leaveTypesRes,
     eventsRes,
     authorizationsRes,
+    companyRes,
   ] = await Promise.all([
     supabase
       .from("employees")
@@ -116,7 +121,7 @@ async function loadWorkspace() {
       .select("employee_id, leave_type_id, days_remaining, leave_types ( name )"),
     supabase
       .from("leave_types")
-      .select("id, name, default_days, code")
+      .select("id, name, default_days, code, active")
       .order("name"),
     supabase
       .from("events")
@@ -128,7 +133,19 @@ async function loadWorkspace() {
         "id, employee_id, date, start_time, end_time, duration_minutes, reason, status, created_at, approver_id, employees!authorizations_employee_id_fkey ( full_name )",
       )
       .order("created_at", { ascending: false }),
+    // RLS returns the signed-in user's company only.
+    supabase
+      .from("organizations")
+      .select("id, name, logo_url, brand_color, monthly_leave_days")
+      .maybeSingle(),
   ]);
+
+  let companyRow = companyRes.data as CompanyRow | null;
+  if (companyRes.error) {
+    // Before supabase/saas/03_company_settings.sql: name only.
+    const retry = await supabase.from("organizations").select("id, name").maybeSingle();
+    companyRow = retry.data as CompanyRow | null;
+  }
 
   let requestRows = (requestsRes.data ?? []) as LeaveRequestRow[];
   if (requestsRes.error) {
@@ -195,11 +212,14 @@ async function loadWorkspace() {
       if (!leaveTypesRes.error) {
         return ((leaveTypesRes.data ?? []) as LeaveTypeRow[]).map(mapLeaveType);
       }
-      const retry = await supabase
-        .from("leave_types")
-        .select("id, name, default_days")
-        .order("name");
-      return ((retry.data ?? []) as LeaveTypeRow[]).map(mapLeaveType);
+      // Older databases: no active (03_company_settings.sql) or no code.
+      for (const columns of ["id, name, default_days, code", "id, name, default_days"]) {
+        const retry = await supabase.from("leave_types").select(columns).order("name");
+        if (!retry.error) {
+          return ((retry.data ?? []) as unknown as LeaveTypeRow[]).map(mapLeaveType);
+        }
+      }
+      return [];
     })(),
     events: ((eventsRes.data ?? []) as EventRow[]).map(mapEvent),
     notices: await loadNotices(supabase, user.id),
@@ -218,6 +238,7 @@ async function loadWorkspace() {
     }),
     currentEmployee:
       mappedEmployees.find((employee) => employee.id === user.id) ?? null,
+    company: companyRow ? mapCompany(companyRow) : null,
   };
 }
 
@@ -285,6 +306,7 @@ export default function Page() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [authorizations, setAuthorizations] = useState<Authorization[]>([]);
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
+  const [company, setCompany] = useState<Company | null>(null);
   const [notice, setNotice] = useState<{ message: string; tone: "success" | "error" } | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const [modal, setModal] = useState<ModalKind | null>(null);
@@ -343,6 +365,7 @@ export default function Page() {
     void refreshUnread();
     setAuthorizations(data.authorizations);
     setCurrentEmployee(data.currentEmployee);
+    setCompany(data.company);
   };
 
   const reload = async () => {
@@ -568,9 +591,15 @@ export default function Page() {
     return <AuthScreen path={path} navigate={navigate} />;
   }
 
+  const brandStyle = company?.brandColor
+    ? (brandTheme(company.brandColor) as CSSProperties)
+    : undefined;
+
   return (
+    <CompanyContext.Provider value={company}>
     <div
       className={`app-shell ${isEmployee ? "employee-shell" : "admin-shell"}`}
+      style={brandStyle}
     >
       {isEmployee ? (
         <EmployeeNav
@@ -844,5 +873,6 @@ export default function Page() {
         />
       )}
     </div>
+    </CompanyContext.Provider>
   );
 }

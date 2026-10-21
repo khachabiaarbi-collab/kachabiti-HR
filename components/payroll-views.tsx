@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { Employee } from "@/lib/app-types";
 import { ConfirmModal } from "@/components/modals";
-import { Avatar, Button, Field, Header, Metric, ModernSelect } from "@/components/primitives";
+import { Avatar, Button, Field, Header, Metric, ModernSelect, useCompany } from "@/components/primitives";
 import { useLanguage } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import { formatDisplayDate, isoDate } from "@/lib/map-rows";
@@ -1888,7 +1888,7 @@ export function PayslipDocument({ payslips, onClose }: { payslips: Payslip[]; on
   useEffect(() => {
     loadCompany()
       .then(setCompany)
-      .catch(() => setCompany({ name: "Kachabiti", address: null, taxId: null, cnssEmployerNumber: null }));
+      .catch(() => setCompany({ name: "", address: null, taxId: null, cnssEmployerNumber: null }));
     document.body.classList.add("has-payslip-doc");
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeRef.current();
@@ -1935,6 +1935,7 @@ export function PayslipDocument({ payslips, onClose }: { payslips: Payslip[]; on
 }
 
 function PayslipSheet({ payslip, company }: { payslip: Payslip; company: PayrollCompany | null }) {
+  const workspaceCompany = useCompany();
   const { inputs } = payslip;
   const { from, to } = monthRange(payslip.period);
   const earnings = payslip.lines.filter((line) => line.kind === "earning");
@@ -1962,7 +1963,7 @@ function PayslipSheet({ payslip, company }: { payslip: Payslip; company: Payroll
       <article className="payslip-doc">
         <header className="payslip-doc-head">
           <div>
-            <h2>{company?.name ?? "Kachabiti"}</h2>
+            <h2>{company?.name || workspaceCompany?.name}</h2>
             {company?.address && <p>{company.address}</p>}
             {company?.taxId && <p>Matricule fiscal : {company.taxId}</p>}
             {company?.cnssEmployerNumber && <p>N° affiliation CNSS : {company.cnssEmployerNumber}</p>}

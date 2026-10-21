@@ -49,6 +49,7 @@ lib/payroll-calc.ts          # Pure payslip calculation (tested in payroll-calc.
 lib/payroll-run.ts           # Prepare / recalculate / lock a month (Supabase)
 lib/payroll-export.ts        # CSV exports (tested in payroll-export.test.ts)
 lib/leave-accrual.ts         # Vacation earned from the time clock (tested in leave-accrual.test.ts)
+lib/company-profile*.ts      # Company name, logo, colour, leave rate (Settings → Company Profile)
 lib/supabase/…               # browser, server, middleware clients
 middleware.ts
 ```

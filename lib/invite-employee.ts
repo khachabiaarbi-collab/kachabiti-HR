@@ -88,7 +88,20 @@ export async function inviteEmployee(input: {
   const jobTitle = input.jobTitle.trim() || null;
   const departmentId = input.departmentId.trim() || null;
   const startDate = input.startDate.trim() || null;
-  const monthlyLeaveDays = parseMonthlyLeaveDays(input.monthlyLeaveDays);
+  // An empty rate takes the company's (supabase/saas/03_company_settings.sql;
+  // RLS returns the inviter's company only).
+  let companyRate: number | string | null = null;
+  if (!input.monthlyLeaveDays.trim()) {
+    const { data: company } = await supabase
+      .from("organizations")
+      .select("monthly_leave_days")
+      .maybeSingle();
+    companyRate = (company as { monthly_leave_days?: number | string | null } | null)
+      ?.monthly_leave_days ?? null;
+  }
+  const monthlyLeaveDays = parseMonthlyLeaveDays(
+    input.monthlyLeaveDays.trim() ? input.monthlyLeaveDays : companyRate,
+  );
   const role = toDbRole(input.role);
 
   // Read with the inviter's client: RLS only shows their own company.

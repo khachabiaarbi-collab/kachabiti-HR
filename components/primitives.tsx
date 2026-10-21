@@ -1,8 +1,10 @@
 "use client";
 
+import { createContext, useContext } from "react";
 import { Select } from "@base-ui/react/select";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
-import type { Employee } from "@/lib/app-types";
+import type { Company, Employee } from "@/lib/app-types";
+import { companyInitial } from "@/lib/company-profile-file";
 import { DatePicker, DateRangePicker } from "@/components/date-range-picker";
 import {
   filterOptionLabel,
@@ -68,8 +70,33 @@ function pageNumbers(page: number, pageCount: number) {
   return items;
 }
 
-const LOGO_SRC =
-  "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/469362479_122124207824423950_2630084246229930837_n%20%281%29-dMJX1LqphsKk0byhJm634qPx7gW1Mb.jpg";
+/** Product name shown before sign-in, when no company is known yet. */
+export const PRODUCT_NAME = "RHFlow";
+
+/** The signed-in user's company; null on the sign-in screens. */
+export const CompanyContext = createContext<Company | null>(null);
+
+export function useCompany() {
+  return useContext(CompanyContext);
+}
+
+/** Company logo, or its first letter when it has none. */
+export function CompanyMark({
+  company,
+  className,
+}: {
+  company: Pick<Company, "name" | "logoUrl">;
+  className: string;
+}) {
+  if (company.logoUrl) {
+    return <img className={`${className} has-image`} src={company.logoUrl} alt="" />;
+  }
+  return (
+    <span className={className} aria-hidden="true">
+      {companyInitial(company.name)}
+    </span>
+  );
+}
 
 export function Avatar({
   e,
@@ -95,10 +122,12 @@ export function Avatar({
 }
 
 export function Logo({ dark = false }: { dark?: boolean }) {
+  const company = useCompany();
+  const shown = company ?? { name: PRODUCT_NAME, logoUrl: null };
   return (
     <div className={`brand-logo ${dark ? "dark-logo" : ""}`}>
-      <img className="brand-logo-image" src={LOGO_SRC} alt="Kachabiti logo" />
-      <b>kachabiti HR</b>
+      <CompanyMark company={shown} className="brand-logo-image" />
+      <b>{shown.name}</b>
     </div>
   );
 }

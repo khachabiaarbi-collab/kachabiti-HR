@@ -7259,3 +7259,148 @@ body {
     padding: 8px 10px;
   }
 }
+
+/* --- Company brand (Settings → Company Profile) --------------------------
+   app/page.tsx sets --brand, --brand-foreground and --brand-hover on
+   .app-shell (brandTheme in lib/company-profile-file.ts). Without a brand
+   colour every value falls back to the design system. */
+.app-shell .primary-button {
+  border-color: var(--brand, var(--ds-primary));
+  background: var(--brand, var(--ds-primary));
+  color: var(--brand-foreground, #fff);
+}
+.app-shell .primary-button:hover:not(:disabled) {
+  border-color: var(--brand-hover, var(--ds-primary-hover));
+  background: var(--brand-hover, var(--ds-primary-hover));
+}
+.brand-logo span.brand-logo-image,
+.workspace-icon,
+.settings-identity-mark {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--brand, #171717);
+  color: var(--brand-foreground, #fff);
+  font-weight: 700;
+}
+.brand-logo span.brand-logo-image {
+  font-size: 16px;
+}
+.settings-identity-mark {
+  background: var(--brand, var(--ds-primary));
+}
+img.workspace-icon,
+img.settings-identity-mark {
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--ds-border);
+}
+.company-profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 720px;
+}
+.company-logo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.company-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.company-profile-grid > :first-child {
+  grid-column: 1 / -1;
+}
+.company-color-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.company-color-input input[type="color"] {
+  width: 42px;
+  height: var(--ds-control-h);
+  flex-shrink: 0;
+  padding: 3px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-sm);
+  background: var(--ds-surface);
+  cursor: pointer;
+}
+.company-color-input input:not([type="color"]) {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .company-profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- Leave policy (Settings → Leave Policy) ------------------------------ */
+.leave-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+.leave-policy-list {
+  max-width: none;
+}
+.leave-policy-list li.is-inactive b {
+  color: var(--ds-text-3);
+}
+.leave-policy-tags {
+  display: flex;
+  gap: 6px;
+}
+.leave-policy-tags:empty {
+  display: none;
+}
+.leave-policy-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ds-subtle);
+  color: var(--ds-text-2);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+.leave-policy-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.leave-policy-actions > em {
+  margin-right: 6px;
+}
+.leave-policy-list li.leave-policy-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+  background: var(--ds-subtle);
+}
+.leave-policy-edit .form-check,
+.leave-policy-edit .settings-block-actions {
+  grid-column: 1 / -1;
+}
+.leave-policy-edit .settings-block-actions {
+  justify-content: flex-end;
+}
+.leave-policy-new {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .leave-policy-new,
+  .leave-policy-list li.leave-policy-edit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

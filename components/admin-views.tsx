@@ -36,6 +36,8 @@ import type {
 import {
   Avatar,
   Button,
+  CompanyMark,
+  Field,
   FilterBar,
   Header,
   ModernSelect,
@@ -46,7 +48,16 @@ import {
   Status,
   paginate,
   pageForId,
+  useCompany,
 } from "@/components/primitives";
+import {
+  removeCompanyLogo,
+  saveCompanyProfile,
+  uploadCompanyLogo,
+} from "@/lib/company-profile";
+import { normalizeBrandColor } from "@/lib/company-profile-file";
+import { createLeaveType, deleteLeaveType, updateLeaveType } from "@/lib/leave-policy";
+import { isBuiltInLeaveType } from "@/lib/leave-policy-file";
 import { PayrollView } from "@/components/payroll-views";
 import type { MessageKey } from "@/lib/messages";
 import {
@@ -505,6 +516,8 @@ export function AdminView({
         departments={departments}
         employees={employees}
         flash={flash}
+        canEditCompany={canManagePayroll}
+        reload={reload}
       />
     );
   }
@@ -2410,16 +2423,400 @@ function Analytics({
   );
 }
 
+const DEFAULT_BRAND_COLOR = "#1f3a8a";
+
+function CompanyProfileSettings({
+  canEdit,
+  flash,
+  reload,
+}: {
+  canEdit: boolean;
+  flash: (message: string, tone?: "success" | "error") => void;
+  reload: () => Promise<void>;
+}) {
+  const t = useT();
+  const company = useCompany();
+  const [name, setName] = useState(company?.name ?? "");
+  const [brandColor, setBrandColor] = useState(company?.brandColor ?? "");
+  const [monthlyLeaveDays, setMonthlyLeaveDays] = useState(
+    String(company?.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS),
+  );
+  const [saving, setSaving] = useState(false);
+  const [logoBusy, setLogoBusy] = useState<"upload" | "remove" | null>(null);
+  const logoInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setName(company?.name ?? "");
+    setBrandColor(company?.brandColor ?? "");
+    setMonthlyLeaveDays(String(company?.monthlyLeaveDays ?? DEFAULT_MONTHLY_LEAVE_DAYS));
+  }, [company?.name, company?.brandColor, company?.monthlyLeaveDays]);
+
+  if (!company) return null;
+
+  if (!canEdit) {
+    return (
+      <div className="settings-identity">
+        <CompanyMark company={company} className="settings-identity-mark" />
+        <div>
+          <p className="eyebrow">{t("admin.companyName")}</p>
+          <h3>{company.name}</h3>
+          <p>{t("admin.companyAdminOnly")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const save = async () => {
+    if (saving || logoBusy) return;
+    setSaving(true);
+    try {
+      const error = await saveCompanyProfile({ name, brandColor, monthlyLeaveDays });
+      if (error) {
+        flash(error, "error");
+        return;
+      }
+      await reload();
+      flash(t("admin.companySaved"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadLogo = async (file: File | null) => {
+    if (!file || logoBusy || saving) return;
+    setLogoBusy("upload");
+    const payload = new FormData();
+    payload.append("file", file);
+    try {
+      const uploaded = await uploadCompanyLogo(payload);
+      if (uploaded.error) {
+        flash(uploaded.error, "error");
+        return;
+      }
+      await reload();
+      flash(t("admin.logoUpdated"));
+    } finally {
+      setLogoBusy(null);
+    }
+  };
+
+  const removeLogo = async () => {
+    if (logoBusy || saving) return;
+    setLogoBusy("remove");
+    try {
+      const error = await removeCompanyLogo();
+      if (error) {
+        flash(error, "error");
+        return;
+      }
+      await reload();
+      flash(t("admin.logoRemoved"));
+    } finally {
+      setLogoBusy(null);
+    }
+  };
+
+  const pickedColor = normalizeBrandColor(brandColor);
+
+  return (
+    <div className="company-profile-form">
+      <section className="settings-block">
+        <header>
+          <h3>{t("admin.companyLogo")}</h3>
+          <p>{t("admin.logoHint")}</p>
+        </header>
+        <div className="company-logo-row">
+          <CompanyMark company={{ name, logoUrl: company.logoUrl }} className="settings-identity-mark" />
+          <input
+            ref={logoInput}
+            className="profile-photo-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              void uploadLogo(file);
+            }}
+          />
+          <Button
+            secondary
+            type="button"
+            busy={logoBusy === "upload"}
+            disabled={logoBusy !== null}
+            onClick={() => logoInput.current?.click()}
+          >
+            {logoBusy === "upload" ? t("admin.uploadingLogo") : t("admin.uploadLogo")}
+          </Button>
+          {company.logoUrl && (
+            <Button
+              secondary
+              type="button"
+              busy={logoBusy === "remove"}
+              disabled={logoBusy !== null}
+              onClick={() => void removeLogo()}
+            >
+              {logoBusy === "remove" ? t("admin.removingLogo") : t("admin.removeLogo")}
+            </Button>
+          )}
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="company-profile-grid">
+          <Field label={t("admin.companyName")} value={name} onChange={setName} required />
+          <label className="form-label">
+            <span className="form-label-text">{t("admin.brandColor")}</span>
+            <span className="company-color-input">
+              <input
+                type="color"
+                aria-label={t("admin.brandColor")}
+                value={pickedColor ?? DEFAULT_BRAND_COLOR}
+                onChange={(event) => setBrandColor(event.target.value)}
+              />
+              <input
+                value={brandColor}
+                placeholder={DEFAULT_BRAND_COLOR}
+                onChange={(event) => setBrandColor(event.target.value)}
+              />
+            </span>
+            <span className="field-hint">{t("admin.brandColorHint")}</span>
+          </label>
+          <Field
+            label={t("admin.monthlyLeaveRate")}
+            type="number"
+            step="0.25"
+            min="0.25"
+            max="5"
+            value={monthlyLeaveDays}
+            onChange={setMonthlyLeaveDays}
+            hint={t("admin.monthlyLeaveRateHint")}
+          />
+        </div>
+        <p className="field-hint">{t("admin.employerDetailsNote")}</p>
+      </section>
+
+      <div className="settings-savebar">
+        <div />
+        <Button type="button" busy={saving} disabled={logoBusy !== null} onClick={() => void save()}>
+          {t("admin.saveCompany")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type LeaveTypeDraft = { name: string; defaultDays: string; active: boolean };
+
+function LeavePolicySettings({
+  leaveTypes,
+  canEdit,
+  flash,
+  reload,
+}: {
+  leaveTypes: LeaveType[];
+  canEdit: boolean;
+  flash: (message: string, tone?: "success" | "error") => void;
+  reload: () => Promise<void>;
+}) {
+  const t = useT();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<LeaveTypeDraft>({ name: "", defaultDays: "0", active: true });
+  const [newType, setNewType] = useState({ name: "", defaultDays: "0" });
+  const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<LeaveType | null>(null);
+
+  const run = async (action: () => Promise<string | null | undefined>, success: MessageKey) => {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const error = await action();
+      if (error) {
+        flash(error, "error");
+        return false;
+      }
+      await reload();
+      flash(t(success));
+      return true;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (type: LeaveType) => {
+    setEditingId(type.id);
+    setDraft({
+      name: type.name,
+      defaultDays: String(type.defaultDays),
+      active: type.active !== false,
+    });
+  };
+
+  const saveEdit = async (id: string) => {
+    if (await run(() => updateLeaveType({ id, ...draft }), "admin.leaveTypeSaved")) {
+      setEditingId(null);
+    }
+  };
+
+  const add = async () => {
+    if (await run(() => createLeaveType(newType), "admin.leaveTypeAdded")) {
+      setNewType({ name: "", defaultDays: "0" });
+    }
+  };
+
+  return (
+    <div className="leave-policy">
+      {canEdit ? (
+        <p className="field-hint">{t("admin.leavePolicyNote")}</p>
+      ) : (
+        <p className="field-hint">{t("admin.leavePolicyAdminOnly")}</p>
+      )}
+      {leaveTypes.length === 0 ? (
+        <p className="settings-empty">{t("admin.noLeaveTypes")}</p>
+      ) : (
+        <ul className="settings-list leave-policy-list">
+          {leaveTypes.map((type) => {
+            const builtIn = isBuiltInLeaveType(type.code);
+            const label = leaveTypeLabel(t, type.name);
+            if (editingId === type.id) {
+              return (
+                <li key={type.id} className="leave-policy-edit">
+                  <Field
+                    label={t("admin.leaveTypeName")}
+                    value={draft.name}
+                    onChange={(name) => setDraft({ ...draft, name })}
+                  />
+                  <Field
+                    label={t("admin.defaultDays")}
+                    type="number"
+                    min="0"
+                    max="365"
+                    step="1"
+                    value={draft.defaultDays}
+                    onChange={(defaultDays) => setDraft({ ...draft, defaultDays })}
+                  />
+                  {!builtIn && (
+                    <label className="form-check">
+                      <input
+                        type="checkbox"
+                        checked={draft.active}
+                        onChange={(event) => setDraft({ ...draft, active: event.target.checked })}
+                      />
+                      <span>{t("admin.typeRequestable")}</span>
+                    </label>
+                  )}
+                  <div className="settings-block-actions">
+                    <Button secondary type="button" disabled={busy} onClick={() => setEditingId(null)}>
+                      {t("common.cancel")}
+                    </Button>
+                    <Button type="button" busy={busy} onClick={() => void saveEdit(type.id)}>
+                      {t("common.save")}
+                    </Button>
+                  </div>
+                </li>
+              );
+            }
+            return (
+              <li key={type.id} className={type.active === false ? "is-inactive" : undefined}>
+                <div>
+                  <b>{label}</b>
+                  <span className="leave-policy-tags">
+                    {builtIn && <em className="leave-policy-tag">{t("admin.builtInType")}</em>}
+                    {type.active === false && (
+                      <em className="leave-policy-tag">{t("admin.inactiveType")}</em>
+                    )}
+                  </span>
+                </div>
+                <div className="leave-policy-actions">
+                  <em>{t("admin.policyDays", { days: type.defaultDays })}</em>
+                  {canEdit && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        disabled={busy || editingId !== null}
+                        aria-label={t("admin.editLeaveType", { name: label })}
+                        onClick={() => startEdit(type)}
+                      >
+                        <Pencil size={15} />
+                      </button>
+                      {!builtIn && (
+                        <button
+                          type="button"
+                          className="icon-button"
+                          disabled={busy || editingId !== null}
+                          aria-label={t("admin.deleteLeaveType", { name: label })}
+                          onClick={() => setPendingDelete(type)}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {canEdit && (
+        <section className="settings-block">
+          <header>
+            <h3>{t("admin.newLeaveType")}</h3>
+          </header>
+          <div className="leave-policy-new">
+            <Field
+              label={t("admin.leaveTypeName")}
+              value={newType.name}
+              onChange={(name) => setNewType({ ...newType, name })}
+            />
+            <Field
+              label={t("admin.defaultDays")}
+              type="number"
+              min="0"
+              max="365"
+              step="1"
+              value={newType.defaultDays}
+              onChange={(defaultDays) => setNewType({ ...newType, defaultDays })}
+            />
+            <Button type="button" busy={busy} disabled={!newType.name.trim()} onClick={() => void add()}>
+              <Plus size={15} /> {t("admin.addLeaveType")}
+            </Button>
+          </div>
+        </section>
+      )}
+      {pendingDelete && (
+        <ConfirmModal
+          title={t("admin.deleteLeaveTypeTitle")}
+          message={t("admin.deleteLeaveTypeBody", { name: leaveTypeLabel(t, pendingDelete.name) })}
+          confirmLabel={t("common.delete")}
+          cancelLabel={t("common.cancel")}
+          close={() => setPendingDelete(null)}
+          confirm={async () => {
+            const id = pendingDelete.id;
+            if (await run(() => deleteLeaveType(id), "admin.leaveTypeDeleted")) {
+              setPendingDelete(null);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function SettingsView({
   leaveTypes,
   departments,
   employees,
   flash,
+  canEditCompany,
+  reload,
 }: {
   leaveTypes: LeaveType[];
   departments: Department[];
   employees: Employee[];
   flash: (message: string, tone?: "success" | "error") => void;
+  canEditCompany: boolean;
+  reload: () => Promise<void>;
 }) {
   const t = useT();
   const [tab, setTab] = useState("Company Profile");
@@ -2497,30 +2894,16 @@ function SettingsView({
             <p>{current.intro}</p>
           </div>
           {tab === "Company Profile" && (
-            <div className="settings-identity">
-              <span className="settings-identity-mark" aria-hidden="true">
-                K
-              </span>
-              <div>
-                <p className="eyebrow">{t("admin.companyName")}</p>
-                <h3>Kachabiti</h3>
-                <p>{t("admin.brandingFixed")}</p>
-              </div>
-            </div>
+            <CompanyProfileSettings canEdit={canEditCompany} flash={flash} reload={reload} />
           )}
-          {tab === "Leave Policy" &&
-            (leaveTypes.length === 0 ? (
-              <p className="settings-empty">{t("admin.noLeaveTypes")}</p>
-            ) : (
-              <ul className="settings-list">
-                {leaveTypes.map((type) => (
-                  <li key={type.id}>
-                    <b>{leaveTypeLabel(t, type.name)}</b>
-                    <em>{t("admin.policyDays", { days: type.defaultDays })}</em>
-                  </li>
-                ))}
-              </ul>
-            ))}
+          {tab === "Leave Policy" && (
+            <LeavePolicySettings
+              leaveTypes={leaveTypes}
+              canEdit={canEditCompany}
+              flash={flash}
+              reload={reload}
+            />
+          )}
           {tab === "Attendance" && (
             <AttendanceScheduleSettings employees={employees} flash={flash} />
           )}
