@@ -47,9 +47,6 @@ const ERROR_STATUS: Record<string, number> = {
   TARGET_PUNCH_NOT_FOUND: 404,
   CORRECTION_NOT_FOUND: 404,
   SCHEDULE_NOT_FOUND: 404,
-  LOCATION_REQUIRED: 422,
-  OUTSIDE_WORK_LOCATION: 422,
-  INVALID_LOCATION: 400,
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -70,9 +67,6 @@ const ERROR_MESSAGES: Record<string, string> = {
   TARGET_PUNCH_NOT_FOUND: "The selected punch was not found.",
   CORRECTION_NOT_FOUND: "The correction request was not found.",
   SCHEDULE_NOT_FOUND: "The work schedule was not found.",
-  LOCATION_REQUIRED: "Turn on location to punch at the workplace.",
-  OUTSIDE_WORK_LOCATION: "You can only punch from a configured work location.",
-  INVALID_LOCATION: "The work location is invalid.",
 };
 
 function databaseCode(error: { message?: string; details?: string } | null) {
@@ -133,14 +127,8 @@ export async function requireAttendanceAuth(
 export async function getTodayAttendance(auth: AttendanceAuth) {
   const { data, error } = await auth.supabase.rpc("attendance_today");
   if (error) throwAttendanceDatabaseError(error);
-  const { listWorkLocations } = await import("@/lib/work-locations-server");
-  const locations = (await listWorkLocations(auth)).filter((item) => item.isActive);
-  return {
-    ...(data as AttendanceDaySummary & {
-      previousIncomplete: AttendanceDaySummary | null;
-    }),
-    locationRequired: locations.length > 0,
-    workLocations: locations,
+  return data as AttendanceDaySummary & {
+    previousIncomplete: AttendanceDaySummary | null;
   };
 }
 
