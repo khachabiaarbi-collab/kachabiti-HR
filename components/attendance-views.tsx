@@ -18,7 +18,6 @@ import {
   GripVertical,
   History,
   LoaderCircle,
-  MapPin,
   PencilLine,
   Plus,
   RefreshCw,
@@ -54,12 +53,6 @@ import {
 } from "@/lib/leave-hours";
 import { useLeaveHourBalance } from "@/lib/use-leave-hours";
 import {
-  coordsFromMapsText,
-  googleMapsPinUrl,
-  googleMapsSearchUrl,
-  type WorkLocation,
-} from "@/lib/geo";
-import {
   ATTENDANCE_TIMEZONE,
   formatAttendanceDuration,
   type AttendanceApiError,
@@ -84,8 +77,6 @@ import {
 
 type TodayAttendance = AttendanceDaySummary & {
   previousIncomplete: AttendanceDaySummary | null;
-  locationRequired?: boolean;
-  workLocations?: WorkLocation[];
 };
 
 type CorrectionDraft = {
@@ -118,44 +109,6 @@ function formatClockDay(value: Date, dateLocale: string) {
 function apiMessage(payload: unknown, fallback: string) {
   const response = payload as Partial<AttendanceApiError> | null;
   return response?.error?.message ?? fallback;
-}
-
-function punchErrorMessage(
-  payload: unknown,
-  t: ReturnType<typeof useT>,
-  fallback: string,
-) {
-  const code = (payload as Partial<AttendanceApiError> | null)?.error?.code;
-  if (code === "LOCATION_REQUIRED") return t("att.locationRequired");
-  if (code === "OUTSIDE_WORK_LOCATION") return t("att.outsideLocation");
-  return apiMessage(payload, fallback);
-}
-
-function readDeviceLocation(): Promise<{
-  latitude: number;
-  longitude: number;
-  accuracyMeters: number;
-}> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("LOCATION_UNAVAILABLE"));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: position.coords.accuracy ?? 0,
-        }),
-      (error) => {
-        reject(
-          new Error(error.code === error.PERMISSION_DENIED ? "LOCATION_DENIED" : "LOCATION_UNAVAILABLE"),
-        );
-      },
-      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 15_000 },
-    );
-  });
 }
 
 async function fetchToday(signal?: AbortSignal, fallback?: string) {
@@ -402,26 +355,12 @@ export function EmployeeTimeClock({
     const key = pendingIdempotencyKey.current ?? crypto.randomUUID();
     pendingIdempotencyKey.current = key;
     try {
-      let coords: { latitude: number; longitude: number; accuracyMeters: number } | null = null;
-      if (attendance.locationRequired) {
-        try {
-          coords = await readDeviceLocation();
-        } catch (error) {
-          const code = error instanceof Error ? error.message : "";
-          flash(
-            code === "LOCATION_DENIED" ? t("att.locationDenied") : t("att.locationUnavailable"),
-            "error",
-          );
-          return;
-        }
-      }
       const response = await fetch("/api/attendance/punch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idempotencyKey: key,
           expectedLatestPunchId: attendance.latestPunchId,
-          ...(coords ?? {}),
         }),
       });
       const payload: unknown = await response.json();
@@ -431,7 +370,7 @@ export function EmployeeTimeClock({
           pendingIdempotencyKey.current = null;
           await load();
         }
-        flash(punchErrorMessage(payload, t, t("att.punchFailed")), "error");
+        flash(apiMessage(payload, t("att.punchFailed")), "error");
         return;
       }
       pendingIdempotencyKey.current = null;
@@ -552,16 +491,6 @@ export function EmployeeTimeClock({
           )}
           {attendance.nextAction ? actionLabel : t("att.unavailableAction")}
         </button>
-        {attendance.locationRequired && (
-          <small className="clock-location-hint">
-            <MapPin size={13} />
-            {t("att.locationHint", {
-              places:
-                attendance.workLocations?.map((location) => location.name).join(", ") ||
-                t("att.workplace"),
-            })}
-          </small>
-        )}
         {attendance.blockReason && (
           <small className="clock-block-reason">
             {attendance.blockReason === "MAX_SESSIONS"
@@ -2358,232 +2287,12 @@ export function AttendanceScheduleSettings({
         onChange={(assignments) => setDraft({ ...draft, assignments })}
       />
 
-      <div className="settings-savebar">
-        <div>
-          {error && <p className="correction-error">{error}</p>}
-          <p>{t("att.saveNote")}</p>
-        </div>
-        <button type="button" className="primary-button" disabled={saving} onClick={save}>
-          {saving ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
-          {t("att.saveSettings")}
-        </button>
-      </div>
-      <WorkLocationSettings flash={flash} />
+      {error && <p className="correction-error">{error}</p>}
+      <button type="button" className="primary-button" disabled={saving} onClick={save}>
+        {saving ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
+        {t("att.saveSettings")}
+      </button>
     </div>
-  );
-}
-
-function WorkLocationSettings({
-  flash,
-}: {
-  flash: (message: string, tone?: "success" | "error") => void;
-}) {
-  const t = useT();
-  const [locations, setLocations] = useState<WorkLocation[]>([]);
-  const [name, setName] = useState("");
-  const [mapsQuery, setMapsQuery] = useState("");
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
-  const [radiusMeters, setRadiusMeters] = useState("150");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    const response = await fetch("/api/attendance/locations", { cache: "no-store" });
-    const payload: unknown = await response.json();
-    if (!response.ok) throw new Error(apiMessage(payload, t("att.locationsFailed")));
-    setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
-  }, [t]);
-
-  useEffect(() => {
-    void load().catch(() => undefined);
-  }, [load]);
-
-  const applyPoint = (latitudeValue: number, longitudeValue: number) => {
-    setLatitude(String(latitudeValue));
-    setLongitude(String(longitudeValue));
-  };
-
-  const applyMapsText = (value: string) => {
-    setMapsQuery(value);
-    const point = coordsFromMapsText(value);
-    if (point) applyPoint(point.latitude, point.longitude);
-  };
-
-  const resetDraft = () => {
-    setEditingId(null);
-    setName("");
-    setMapsQuery("");
-    setLatitude("");
-    setLongitude("");
-    setRadiusMeters("150");
-  };
-
-  const openGoogleMaps = () => {
-    const pinned =
-      latitude && longitude
-        ? { latitude: Number(latitude), longitude: Number(longitude) }
-        : coordsFromMapsText(mapsQuery);
-    const url = pinned
-      ? googleMapsPinUrl(pinned)
-      : googleMapsSearchUrl(mapsQuery || name);
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
-
-  const useHere = async () => {
-    try {
-      const here = await readDeviceLocation();
-      applyPoint(here.latitude, here.longitude);
-      window.open(googleMapsPinUrl(here), "_blank", "noopener,noreferrer");
-    } catch {
-      flash(t("att.locationUnavailable"), "error");
-    }
-  };
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      const response = await fetch("/api/attendance/locations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editingId,
-          name,
-          latitude,
-          longitude,
-          radiusMeters,
-          isActive: true,
-        }),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        flash(apiMessage(payload, t("att.locationSaveFailed")), "error");
-        return;
-      }
-      setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
-      resetDraft();
-      flash(t("att.locationSaved"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (id: string) => {
-    setBusy(true);
-    try {
-      const response = await fetch(`/api/attendance/locations?id=${id}`, { method: "DELETE" });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        flash(apiMessage(payload, t("att.locationSaveFailed")), "error");
-        return;
-      }
-      setLocations((payload as { locations: WorkLocation[] }).locations ?? []);
-      if (editingId === id) resetDraft();
-      flash(t("att.locationRemoved"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="settings-block work-location-settings">
-      <header>
-        <h3>{t("att.workLocations")}</h3>
-        <p>{t("att.workLocationsNote")}</p>
-      </header>
-      {locations.length === 0 ? (
-        <p className="page-subtitle">{t("att.noWorkLocations")}</p>
-      ) : (
-        <ul className="work-location-list">
-          {locations.map((location) => (
-            <li key={location.id}>
-              <div>
-                <b>{location.name}</b>
-                <span>
-                  {location.radiusMeters} m
-                  {location.isActive ? "" : ` · ${t("status.inactive")}`}
-                </span>
-              </div>
-              <div>
-                <a
-                  className="icon-button"
-                  href={googleMapsPinUrl(location)}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={t("att.seeOnMaps")}
-                >
-                  <MapPin size={14} />
-                </a>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={t("att.editLocation")}
-                  onClick={() => {
-                    setEditingId(location.id);
-                    setName(location.name);
-                    setMapsQuery(googleMapsPinUrl(location));
-                    setLatitude(String(location.latitude));
-                    setLongitude(String(location.longitude));
-                    setRadiusMeters(String(location.radiusMeters));
-                  }}
-                >
-                  <PencilLine size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={t("common.delete")}
-                  onClick={() => void remove(location.id)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="work-location-form">
-        <label className="form-label">
-          {t("att.locationName")}
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label className="form-label work-location-maps">
-          {t("att.mapsSearch")}
-          <input
-            value={mapsQuery}
-            placeholder={t("att.mapsSearchPlaceholder")}
-            onChange={(event) => applyMapsText(event.target.value)}
-          />
-        </label>
-        <label className="form-label">
-          {t("att.radiusMeters")}
-          <input
-            type="number"
-            min={30}
-            max={2000}
-            value={radiusMeters}
-            onChange={(event) => setRadiusMeters(event.target.value)}
-          />
-        </label>
-        <p className="page-subtitle">
-          {latitude && longitude
-            ? `${t("att.mapsPicked")}: ${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`
-            : t("att.mapsNeedPin")}
-        </p>
-        <div className="work-location-actions">
-          <button type="button" className="secondary-button" onClick={openGoogleMaps}>
-            <MapPin size={14} /> {t("att.openGoogleMaps")}
-          </button>
-          <button type="button" className="secondary-button" onClick={() => void useHere()}>
-            {t("att.useMyPosition")}
-          </button>
-          <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>
-            {busy ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />}
-            {editingId ? t("att.saveLocation") : t("att.addLocation")}
-          </button>
-        </div>
-      </div>
-    </section>
   );
 }
 
