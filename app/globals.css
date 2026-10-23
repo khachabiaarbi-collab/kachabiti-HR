@@ -3820,62 +3820,6 @@ button.attendance-report-row:hover {
   flex-direction: column;
   gap: 22px;
 }
-.clock-location-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  color: #4f46e5;
-  font-size: 12px;
-  font-weight: 500;
-}
-.work-location-settings {
-  gap: 12px;
-  background: #fafaf8;
-}
-.work-location-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.work-location-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid #e7e7e3;
-  border-radius: 12px;
-  background: #fff;
-}
-.work-location-list span {
-  display: block;
-  color: #6b7280;
-  font-size: 12px;
-}
-.work-location-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: end;
-}
-.work-location-form .form-label {
-  margin-top: 0;
-}
-.work-location-form .work-location-maps,
-.work-location-form .page-subtitle,
-.work-location-actions {
-  grid-column: 1 / -1;
-}
-.work-location-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
 .schedule-picker,
 .attendance-settings-grid {
   display: grid;

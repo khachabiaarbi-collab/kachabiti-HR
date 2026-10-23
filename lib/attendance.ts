@@ -12,10 +12,7 @@ export type AttendanceErrorCode =
   | "UNAUTHENTICATED"
   | "INVALID_REQUEST"
   | "NOT_FOUND"
-  | "SERVER_ERROR"
-  | "LOCATION_REQUIRED"
-  | "OUTSIDE_WORK_LOCATION"
-  | "INVALID_LOCATION";
+  | "SERVER_ERROR";
 
 export type AttendanceTimelineItem = {
   id: string;
