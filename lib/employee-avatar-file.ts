@@ -1,3 +1,5 @@
+import { isHrRole } from "./roles";
+
 export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 export const AVATAR_TYPES = [
   "image/jpeg",
@@ -41,7 +43,7 @@ export function canChangeEmployeePhoto(
 ): boolean {
   if (actor.status === "inactive") return false;
   if (actor.id === targetEmployeeId) return true;
-  return actor.role === "admin" || actor.role === "manager";
+  return isHrRole(actor.role);
 }
 
 export function resolveAvatarEmployeeId(

@@ -32,6 +32,7 @@ import type {
   ModalKind,
   NoticeFocus,
   RequestTab,
+  WorkspaceAccess,
 } from "@/lib/app-types";
 import {
   Avatar,
@@ -58,6 +59,7 @@ import {
 import { normalizeBrandColor } from "@/lib/company-profile-file";
 import { createLeaveType, deleteLeaveType, updateLeaveType } from "@/lib/leave-policy";
 import { isBuiltInLeaveType } from "@/lib/leave-policy-file";
+import { canDeleteEmployee, normalizeRole } from "@/lib/roles";
 import { PayrollView } from "@/components/payroll-views";
 import type { MessageKey } from "@/lib/messages";
 import {
@@ -224,11 +226,15 @@ async function persistLeaveDecision(
     }
   }
 
-  const { error } = await supabase
+  // RLS lets only the approvers of this employee change the request; a
+  // blocked update changes no row and returns no error.
+  const { data: updated, error } = await supabase
     .from("leave_requests")
     .update({ status, approver_id: approverId })
-    .eq("id", requestId);
-  return error?.message ?? null;
+    .eq("id", requestId)
+    .select("id");
+  if (error) return error.message;
+  return updated?.length ? null : "You cannot decide this request.";
 }
 
 async function persistAuthorizationDecision(
@@ -292,18 +298,24 @@ async function persistAuthorizationDecision(
     payload.leave_days_charged = vacationDaysTaken;
   }
 
-  const { error } = await supabase
+  // A blocked update (RLS) changes no row and returns no error.
+  const blocked = "You cannot decide this request.";
+  const { data: updated, error } = await supabase
     .from("authorizations")
     .update(payload)
-    .eq("id", requestId);
+    .eq("id", requestId)
+    .select("id");
   if (error && /leave_days_charged/i.test(error.message)) {
     const retry = await supabase
       .from("authorizations")
       .update({ status, approver_id: approverId })
-      .eq("id", requestId);
-    return { error: retry.error?.message ?? null, vacationDaysTaken };
+      .eq("id", requestId)
+      .select("id");
+    if (retry.error) return { error: retry.error.message, vacationDaysTaken };
+    return { error: retry.data?.length ? null : blocked, vacationDaysTaken };
   }
-  return { error: error?.message ?? null, vacationDaysTaken };
+  if (error) return { error: error.message, vacationDaysTaken };
+  return { error: updated?.length ? null : blocked, vacationDaysTaken };
 }
 
 async function decideRequest(
@@ -395,7 +407,7 @@ export function AdminView({
   noticeFocus = null,
   onNoticeFocusHandled,
   reload,
-  canManagePayroll = false,
+  access,
 }: {
   active: string;
   setActive: (label: string) => void;
@@ -419,9 +431,9 @@ export function AdminView({
   noticeFocus?: NoticeFocus | null;
   onNoticeFocusHandled?: () => void;
   reload: () => Promise<void>;
-  canManagePayroll?: boolean;
+  access: WorkspaceAccess;
 }) {
-  if (active === "Payroll" && canManagePayroll) {
+  if (active === "Payroll" && access.canEditPeople) {
     return <PayrollView employees={employees} flash={flash} onOpenEmployee={setSelected} />;
   }
   if (active === "People") {
@@ -440,6 +452,7 @@ export function AdminView({
         requests={requests}
         currentEmployee={currentEmployee}
         flash={flash}
+        access={access}
       />
     );
   }
@@ -453,6 +466,7 @@ export function AdminView({
         setModal={setModal}
         flash={flash}
         reload={reload}
+        canEdit={access.canEditPeople}
       />
     );
   }
@@ -469,6 +483,7 @@ export function AdminView({
         reload={reload}
         noticeFocus={noticeFocus}
         onNoticeFocusHandled={onNoticeFocusHandled}
+        canDecide={access.canManageEmployee}
       />
     );
   }
@@ -481,7 +496,7 @@ export function AdminView({
         authorizations={authorizations}
         employees={employees}
         departments={departments}
-        canAddEvent
+        canAddEvent={access.canEditPeople}
       />
     );
   }
@@ -516,7 +531,8 @@ export function AdminView({
         departments={departments}
         employees={employees}
         flash={flash}
-        canEditCompany={canManagePayroll}
+        canEditCompany={access.canEditCompany}
+        canEditPeople={access.canEditPeople}
         reload={reload}
       />
     );
@@ -524,7 +540,10 @@ export function AdminView({
   return (
     <Dashboard
       pending={
-        requests.filter((request) => request.status === "Pending").length
+        requests.filter(
+          (request) =>
+            request.status === "Pending" && access.canManageEmployee(request.employeeId),
+        ).length
       }
       navigate={navigate}
       requests={requests}
@@ -533,6 +552,7 @@ export function AdminView({
       flash={flash}
       reload={reload}
       onOpenAttendance={() => setActive("Attendance")}
+      canDecide={access.canManageEmployee}
     />
   );
 }
@@ -546,6 +566,7 @@ function Dashboard({
   flash,
   reload,
   onOpenAttendance,
+  canDecide,
 }: {
   pending: number;
   navigate: (path: string) => void;
@@ -555,6 +576,8 @@ function Dashboard({
   flash: (message: string, tone?: "success" | "error") => void;
   reload: () => Promise<void>;
   onOpenAttendance: () => void;
+  /** Whether the signed-in person approves this employee's requests. */
+  canDecide: (employeeId: string) => boolean;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingApprove, setPendingApprove] = useState<LeaveRequest | null>(
@@ -750,7 +773,7 @@ function Dashboard({
                 <span>{request.days}</span>
               </div>
               <Status status={request.status} />
-              {request.status === "Pending" && (
+              {request.status === "Pending" && canDecide(request.employeeId) && (
                 <button
                   type="button"
                   className="row-menu"
@@ -820,6 +843,7 @@ function People({
   requests,
   currentEmployee,
   flash,
+  access,
 }: {
   employees: Employee[];
   setEmployees: (employees: Employee[]) => void;
@@ -834,6 +858,7 @@ function People({
   requests: LeaveRequest[];
   currentEmployee: Employee | null;
   flash: (message: string, tone?: "success" | "error") => void;
+  access: WorkspaceAccess;
 }) {
   const { t, dateLocale } = useLanguage();
   const [query, setQuery] = useState("");
@@ -938,9 +963,11 @@ function People({
         eyebrow={t("admin.directory")}
         title={t("admin.employees")}
         action={
-          <Button onClick={() => setModal("employee")}>
-            <UserPlus size={16} /> {t("admin.addEmployee")}
-          </Button>
+          access.canEditPeople ? (
+            <Button onClick={() => setModal("employee")}>
+              <UserPlus size={16} /> {t("admin.addEmployee")}
+            </Button>
+          ) : null
         }
       />
       <div className="card table-card">
@@ -968,7 +995,7 @@ function People({
               label: t("filter.role"),
               value: role,
               setValue: setRole,
-              options: ["All", "Administrator", "Manager", "Employee"],
+              options: ["All", "Owner", "Administrator", "HR", "Manager", "Employee"],
               optionLabel: (option) =>
                 option === "All" ? t("people.allRoles") : translateRole(t, option),
             },
@@ -1121,7 +1148,11 @@ function People({
               >
                 <Pencil size={14} />
               </button>
-              {currentEmployee?.id !== employee.id && (
+              {currentEmployee &&
+                canDeleteEmployee(
+                  { id: currentEmployee.id, role: access.role },
+                  { id: employee.id, role: normalizeRole(employee.role) },
+                ) && (
                 <button
                   type="button"
                   onClick={(event) => {
@@ -1205,6 +1236,7 @@ function Requests({
   reload,
   noticeFocus = null,
   onNoticeFocusHandled,
+  canDecide,
 }: {
   requests: LeaveRequest[];
   authorizations: Authorization[];
@@ -1216,6 +1248,8 @@ function Requests({
   reload: () => Promise<void>;
   noticeFocus?: NoticeFocus | null;
   onNoticeFocusHandled?: () => void;
+  /** Whether the signed-in person approves this employee's requests. */
+  canDecide: (employeeId: string) => boolean;
 }) {
   const { t, dateLocale } = useLanguage();
   const [tab, setTab] = useState<RequestTab>("leaves");
@@ -1423,7 +1457,7 @@ function Requests({
                 >
                   <Eye size={14} />
                 </button>
-                {request.status === "Pending" && (
+                {request.status === "Pending" && canDecide(request.employeeId) && (
                   <>
                     <button
                       type="button"
@@ -1550,7 +1584,7 @@ function Requests({
                 >
                   <Eye size={14} />
                 </button>
-                {request.status === "Pending" && (
+                {request.status === "Pending" && canDecide(request.employeeId) && (
                   <>
                     <button
                       type="button"
@@ -1702,7 +1736,7 @@ function Requests({
           leaveTypes={leaveTypes}
           busy={busyId === selected.id}
           close={() => setSelectedId(null)}
-          onApprove={() =>
+          onApprove={!canDecide(selected.employeeId) ? undefined : () =>
             decideRequest(
               selected.id,
               "approved",
@@ -1713,7 +1747,7 @@ function Requests({
               t,
             )
           }
-          onReject={() =>
+          onReject={!canDecide(selected.employeeId) ? undefined : () =>
             decideRequest(
               selected.id,
               "rejected",
@@ -1738,7 +1772,7 @@ function Requests({
           )}
           busy={busyId === selectedAuthz.id}
           close={() => setSelectedId(null)}
-          onApprove={() =>
+          onApprove={!canDecide(selectedAuthz.employeeId) ? undefined : () =>
             decideAuthorization(
               selectedAuthz.id,
               "approved",
@@ -1749,7 +1783,7 @@ function Requests({
               t,
             )
           }
-          onReject={() =>
+          onReject={!canDecide(selectedAuthz.employeeId) ? undefined : () =>
             decideAuthorization(
               selectedAuthz.id,
               "rejected",
@@ -1774,6 +1808,7 @@ function Departments({
   setModal,
   flash,
   reload,
+  canEdit,
 }: {
   departments: Department[];
   setDepartments: (departments: Department[]) => void;
@@ -1782,6 +1817,8 @@ function Departments({
   setModal: (modal: ModalKind) => void;
   flash: (message: string, tone?: "success" | "error") => void;
   reload: () => Promise<void>;
+  /** Owner, admins and hr add, edit and delete departments. */
+  canEdit: boolean;
 }) {
   const t = useT();
   const [pendingDelete, setPendingDelete] = useState<Department | null>(null);
@@ -1793,9 +1830,11 @@ function Departments({
         eyebrow={t("admin.departmentsEyebrow")}
         title={screenLabel(t, "Departments")}
         action={
-          <Button onClick={() => setModal("department")}>
-            <Plus size={16} /> {t("admin.addDepartment")}
-          </Button>
+          canEdit ? (
+            <Button onClick={() => setModal("department")}>
+              <Plus size={16} /> {t("admin.addDepartment")}
+            </Button>
+          ) : null
         }
       />
       <div className="people-grid">
@@ -1805,21 +1844,23 @@ function Departments({
               <div className="person-icon">
                 <Building2 size={18} />
               </div>
-              <div className="row-actions">
-                <button
-                  type="button"
-                  aria-label={t("modal.editDeptTitle")}
-                  onClick={() => setEditing(department)}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingDelete(department)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              {canEdit && (
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    aria-label={t("modal.editDeptTitle")}
+                    onClick={() => setEditing(department)}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(department)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
             </div>
             <h3>{department.name}</h3>
             <p>{t("admin.employeeCount", { count: department.count })}</p>
@@ -2809,13 +2850,17 @@ function SettingsView({
   employees,
   flash,
   canEditCompany,
+  canEditPeople,
   reload,
 }: {
   leaveTypes: LeaveType[];
   departments: Department[];
   employees: Employee[];
   flash: (message: string, tone?: "success" | "error") => void;
+  /** Owner and admins: company profile. */
   canEditCompany: boolean;
+  /** Owner, admins and hr: leave policy and attendance settings. */
+  canEditPeople: boolean;
   reload: () => Promise<void>;
 }) {
   const t = useT();
@@ -2835,13 +2880,18 @@ function SettingsView({
       intro: t("admin.leaveIntro"),
       icon: Palmtree,
     },
-    {
-      id: "Attendance",
-      label: t("nav.attendance"),
-      hint: t("admin.attendanceHint"),
-      intro: t("admin.attendanceIntro"),
-      icon: Clock3,
-    },
+    // Schedules and work sites are kept by owner, admins and hr.
+    ...(canEditPeople
+      ? [
+          {
+            id: "Attendance",
+            label: t("nav.attendance"),
+            hint: t("admin.attendanceHint"),
+            intro: t("admin.attendanceIntro"),
+            icon: Clock3,
+          },
+        ]
+      : []),
     {
       id: "Departments",
       label: screenLabel(t, "Departments"),
@@ -2899,19 +2949,21 @@ function SettingsView({
           {tab === "Leave Policy" && (
             <LeavePolicySettings
               leaveTypes={leaveTypes}
-              canEdit={canEditCompany}
+              canEdit={canEditPeople}
               flash={flash}
               reload={reload}
             />
           )}
-          {tab === "Attendance" && (
+          {tab === "Attendance" && canEditPeople && (
             <AttendanceScheduleSettings employees={employees} flash={flash} />
           )}
           {tab === "Roles & Permissions" && (
             <div className="settings-roles">
               {(
                 [
+                  ["admin.roleOwnerTitle", "admin.roleOwnerBody"],
                   ["admin.roleAdminTitle", "admin.roleAdminBody"],
+                  ["admin.roleHrTitle", "admin.roleHrBody"],
                   ["admin.roleManagerTitle", "admin.roleManagerBody"],
                   ["admin.roleEmployeeTitle", "admin.roleEmployeeBody"],
                 ] as const

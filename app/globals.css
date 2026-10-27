@@ -7404,3 +7404,12 @@ img.settings-identity-mark {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Read-only employee panel (managers): the fieldset only disables inputs. */
+.drawer-fieldset {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}

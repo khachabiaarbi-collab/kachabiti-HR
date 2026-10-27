@@ -12,6 +12,12 @@ import type {
 } from "@/lib/app-types";
 import { EmployeeAttendance } from "@/components/attendance-views";
 import { ContractSection, EmployeePayslips } from "@/components/payroll-views";
+import {
+  assignableRoles,
+  canChangeRoleOf,
+  canManageAccountOf,
+  normalizeRole,
+} from "@/lib/roles";
 import { Avatar, Button, Field, ModernSelect, Status, useCompany } from "@/components/primitives";
 import { formatLeaveDayCount } from "@/lib/leave-hours";
 import { createClient } from "@/lib/supabase/client";
@@ -741,13 +747,34 @@ export function DepartmentModal({
   );
 }
 
+/** UI value ("Owner", "Administrator", "HR"…) for each database role. */
+const ROLE_UI: Record<string, string> = {
+  owner: "Owner",
+  admin: "Administrator",
+  hr: "HR",
+  manager: "Manager",
+  employee: "Employee",
+};
+
+// Raised by employees_guard / transfer_ownership (01_foundation.sql).
+function roleErrorText(t: ReturnType<typeof useT>, message: string) {
+  if (message.includes("OWNER_CANNOT_BE_DEACTIVATED")) return t("roles.ownerActive");
+  if (message.includes("OWNER_TRANSFER_ONLY")) return t("roles.ownerTransferOnly");
+  if (message.includes("ROLE_NOT_ALLOWED") || message.includes("OWNER_ONLY")) return t("roles.notAllowed");
+  if (message.includes("NEW_OWNER_MUST_BE_ACTIVE_ADMIN")) return t("roles.newOwnerAdmin");
+  return message;
+}
+
 export function EmployeeModal({
   departments,
+  actorRole,
   close,
   flash,
   onInvited,
 }: {
   departments: Department[];
+  /** Database role of the person inviting: decides which roles they can give. */
+  actorRole: string;
   close: () => void;
   flash: (message: string, tone?: "success" | "error") => void;
   onInvited: () => void | Promise<void>;
@@ -856,10 +883,9 @@ export function EmployeeModal({
               value={role}
               onChange={setRole}
               options={[
-                { value: "Employee", label: translateRole(t, "Employee") },
-                { value: "Manager", label: translateRole(t, "Manager") },
-                { value: "Administrator", label: translateRole(t, "Administrator") },
-              ]}
+                "employee",
+                ...assignableRoles(actorRole).filter((item) => item !== "employee").reverse(),
+              ].map((item) => ({ value: ROLE_UI[item], label: translateRole(t, ROLE_UI[item]) }))}
             />
           </label>
         </div>
@@ -898,6 +924,8 @@ export function EmployeeDetail({
   vacation = null,
   canManagePayroll = false,
   canManageAccounts = false,
+  canEdit = true,
+  actor,
   close,
   flash,
   onSaved,
@@ -911,6 +939,10 @@ export function EmployeeDetail({
   canManagePayroll?: boolean;
   /** Admin: change the sign-in email and password. */
   canManageAccounts?: boolean;
+  /** Owner, admins and hr edit; managers only read. */
+  canEdit?: boolean;
+  /** The signed-in person (database role), for role and ownership rules. */
+  actor: { id: string; role: string };
   close: () => void;
   flash: (message: string, tone?: "success" | "error") => void;
   onSaved: (employee: Employee, balances: LeaveBalance[]) => void;
@@ -920,13 +952,21 @@ export function EmployeeDetail({
   const [phone, setPhone] = useState(employee.phone ?? "");
   const [jobTitle, setJobTitle] = useState(employee.jobTitle ?? "");
   const [departmentId, setDepartmentId] = useState(employee.departmentId ?? "");
-  const [role, setRole] = useState(
-    employee.role === "Administrator"
-      ? "Administrator"
-      : employee.role === "Manager"
-        ? "Manager"
-        : "Employee",
-  );
+  const [role, setRole] = useState(ROLE_UI[normalizeRole(employee.role)]);
+  const target = { id: employee.id, role: normalizeRole(employee.role) };
+  const roleEditable = canEdit && canChangeRoleOf(actor, target);
+  // The owner stays active; an admin's status is the owner's call.
+  const statusEditable =
+    canEdit &&
+    target.role !== "owner" &&
+    (target.role !== "admin" || normalizeRole(actor.role) === "owner");
+  const accountsEditable = canManageAccounts && canManageAccountOf(actor, target);
+  const canTransferOwnership =
+    normalizeRole(actor.role) === "owner" &&
+    target.role === "admin" &&
+    employee.status !== "Inactive";
+  const [transferring, setTransferring] = useState(false);
+  const [confirmTransfer, setConfirmTransfer] = useState(false);
   const [status, setStatus] = useState(
     employee.status === "Inactive" ? "Inactive" : "Active",
   );
@@ -1092,7 +1132,7 @@ export function EmployeeDetail({
     if (nextErrors.monthly) return setTab("employment");
     setSaving(true);
     // The sign-in email lives in Supabase Auth: change it there first.
-    if (canManageAccounts && email.trim().toLowerCase() !== employee.email.trim().toLowerCase()) {
+    if (accountsEditable && email.trim().toLowerCase() !== employee.email.trim().toLowerCase()) {
       const message = await updateEmployeeAccount({ employeeId: employee.id, email: email.trim() });
       if (message) {
         setSaving(false);
@@ -1133,7 +1173,7 @@ export function EmployeeDetail({
 
     if (employeeError) {
       setSaving(false);
-      flash(employeeError.message, "error");
+      flash(roleErrorText(t, employeeError.message), "error");
       return;
     }
 
@@ -1233,7 +1273,7 @@ export function EmployeeDetail({
             startDate={startDate}
             uploadingPhoto={uploadingPhoto}
             onPickPhoto={() => {
-              if (uploadingPhoto || saving) return;
+              if (!canEdit || uploadingPhoto || saving) return;
               photoInput.current?.click();
             }}
           />
@@ -1298,6 +1338,7 @@ export function EmployeeDetail({
         </div>
 
         <div className="drawer-body employee-edit-form">
+          <fieldset className="drawer-fieldset" disabled={!canEdit}>
           <section className="drawer-overview" {...panelProps("overview")}>
             <div className="overview-highlight">
               <span>{t("drawer.annualNow")}</span>
@@ -1372,17 +1413,17 @@ export function EmployeeDetail({
                 label={t("profile.workEmail")}
                 name="email"
                 value={email}
-                onChange={canManageAccounts ? setEmail : undefined}
-                readOnly={!canManageAccounts}
-                required={canManageAccounts}
-                hint={canManageAccounts ? t("panel.emailNote") : undefined}
+                onChange={accountsEditable ? setEmail : undefined}
+                readOnly={!accountsEditable}
+                required={accountsEditable}
+                hint={accountsEditable ? t("panel.emailNote") : undefined}
                 error={errors.email}
               />
               <Field label={t("profile.phone")} name="phone" value={phone} onChange={setPhone} />
             </div>
           </section>
 
-          {canManageAccounts && (
+          {accountsEditable && (
             <section className="detail-block drawer-section drawer-subsection" hidden={tab !== "profile"}>
               <p className="eyebrow">{t("panel.accountTitle")}</p>
               <span className="field-hint">{t("panel.accountNote")}</span>
@@ -1435,20 +1476,28 @@ export function EmployeeDetail({
                   ]}
                 />
               </label>
-              <label className="form-label">
-                <span className="form-label-text">{t("profile.role")}</span>
-                <ModernSelect
-                  block
-                  ariaLabel={t("profile.role")}
-                  value={role}
-                  onChange={setRole}
-                  options={[
-                    { value: "Employee", label: translateRole(t, "Employee") },
-                    { value: "Manager", label: translateRole(t, "Manager") },
-                    { value: "Administrator", label: translateRole(t, "Administrator") },
-                  ]}
+              {roleEditable ? (
+                <label className="form-label">
+                  <span className="form-label-text">{t("profile.role")}</span>
+                  <ModernSelect
+                    block
+                    ariaLabel={t("profile.role")}
+                    value={role}
+                    onChange={setRole}
+                    options={[...assignableRoles(actor.role)].reverse().map((item) => ({
+                      value: ROLE_UI[item],
+                      label: translateRole(t, ROLE_UI[item]),
+                    }))}
+                  />
+                </label>
+              ) : (
+                <Field
+                  label={t("profile.role")}
+                  value={translateRole(t, role)}
+                  readOnly
+                  hint={canEdit ? t("roles.roleLocked") : undefined}
                 />
-              </label>
+              )}
             </div>
             <div className="form-label">
               <span className="form-label-text" id="employee-status-label">
@@ -1466,6 +1515,7 @@ export function EmployeeDetail({
                     role="radio"
                     aria-checked={status === value}
                     className={status === value ? "is-active" : undefined}
+                    disabled={!statusEditable}
                     onClick={() => setStatus(value)}
                   >
                     <span className={`segmented-dot is-${value.toLowerCase()}`} />
@@ -1473,8 +1523,18 @@ export function EmployeeDetail({
                   </button>
                 ))}
               </div>
-              <span className="field-hint">{t("drawer.statusHint")}</span>
+              <span className="field-hint">
+                {target.role === "owner" ? t("roles.ownerActive") : t("drawer.statusHint")}
+              </span>
             </div>
+            {canTransferOwnership && (
+              <div className="drawer-inline-action">
+                <span className="field-hint">{t("roles.transferHint", { name: employee.name })}</span>
+                <Button secondary type="button" disabled={transferring} onClick={() => setConfirmTransfer(true)}>
+                  {t("roles.makeOwner")}
+                </Button>
+              </div>
+            )}
             <div className="drawer-grid">
               <Field
                 label={t("profile.startDate")}
@@ -1557,6 +1617,7 @@ export function EmployeeDetail({
           </section>
 
 
+          </fieldset>
           <div {...panelProps("attendance")}>
             {tab === "attendance" && <EmployeeAttendance employeeId={employee.id} />}
           </div>
@@ -1584,6 +1645,13 @@ export function EmployeeDetail({
                 {t("drawer.discard")}
               </button>
             </>
+          ) : !canEdit ? (
+            <>
+              <span className="drawer-footer-note">{t("roles.readOnlyPanel")}</span>
+              <Button secondary onClick={close}>
+                {t("drawer.close")}
+              </Button>
+            </>
           ) : (
             <>
               <span className={`drawer-footer-note${dirty ? " is-dirty" : ""}`}>
@@ -1598,6 +1666,28 @@ export function EmployeeDetail({
             </>
           )}
         </footer>
+        {confirmTransfer && (
+          <ConfirmModal
+            title={t("roles.transferTitle")}
+            message={t("roles.transferBody", { name: employee.name })}
+            confirmLabel={t("roles.makeOwner")}
+            cancelLabel={t("common.cancel")}
+            close={() => setConfirmTransfer(false)}
+            confirm={async () => {
+              setTransferring(true);
+              const { error } = await createClient().rpc("transfer_ownership", {
+                p_new_owner: employee.id,
+              });
+              setTransferring(false);
+              if (error) {
+                flash(roleErrorText(t, error.message), "error");
+                return;
+              }
+              // Your own role changed: reload the whole workspace.
+              window.location.reload();
+            }}
+          />
+        )}
       </aside>
     </>
   );

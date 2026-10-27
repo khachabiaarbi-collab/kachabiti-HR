@@ -1,4 +1,4 @@
-export type Role = "Employee" | "Admin" | "Manager";
+export type Role = "Employee" | "Owner" | "Admin" | "HR" | "Manager";
 
 export type Employee = {
   id: string;
@@ -102,6 +102,21 @@ export type CompanyEvent = {
   startDate: string;
   endDate: string;
   type: string;
+};
+
+/**
+ * What the signed-in person may do in the admin workspace (lib/roles.ts;
+ * the database enforces the same rules).
+ */
+export type WorkspaceAccess = {
+  /** Database role of the signed-in person: owner, admin, hr, manager… */
+  role: string;
+  /** Owner and admins: company profile, sign-in accounts. */
+  canEditCompany: boolean;
+  /** Owner, admins and hr: people, balances, leave policy, settings, payroll. */
+  canEditPeople: boolean;
+  /** Approve for this employee: hr and above anyone, a manager their departments. */
+  canManageEmployee: (employeeId: string) => boolean;
 };
 
 /** The signed-in user's company (organizations row). */

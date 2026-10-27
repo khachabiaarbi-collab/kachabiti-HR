@@ -2,11 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { sameCompanyEmployee } from "@/lib/org-access";
-
-function isStaff(role: string | null | undefined) {
-  return role === "admin" || role === "manager";
-}
+import { canDeleteEmployee, isHrRole } from "@/lib/roles";
 
 async function currentEmployee() {
   const supabase = await createClient();
@@ -35,13 +31,20 @@ export type DeleteEmployeeError =
 
 export async function deleteEmployeeRecord(id: string): Promise<DeleteEmployeeError | string | null> {
   const { supabase, user, employee } = await currentEmployee();
-  if (!user || !employee || !isStaff(employee.role)) {
+  if (!user || !employee) {
     return "delete.notAllowed";
   }
   if (id === user.id) {
     return "delete.self";
   }
-  if (!(await sameCompanyEmployee(supabase, id))) {
+  // RLS only returns colleagues of the same company. Owner and admins
+  // delete; never the owner; an admin only by the owner.
+  const { data: target } = await supabase
+    .from("employees")
+    .select("id, role")
+    .eq("id", id)
+    .maybeSingle();
+  if (!target || !canDeleteEmployee({ id: user.id, role: employee.role }, target)) {
     return "delete.notAllowed";
   }
 
@@ -93,7 +96,7 @@ export async function deleteEmployeeRecord(id: string): Promise<DeleteEmployeeEr
 
 export async function deleteDepartmentRecord(id: string) {
   const { supabase, user, employee } = await currentEmployee();
-  if (!user || !employee || !isStaff(employee.role)) {
+  if (!user || !employee || !isHrRole(employee.role)) {
     return "Not allowed";
   }
   // RLS only shows departments of the caller's company.
@@ -122,62 +125,31 @@ export async function deleteDepartmentRecord(id: string) {
   }
 }
 
+// Requests are deleted with the caller's own client: RLS lets people
+// withdraw their own pending request and approvers delete the requests they
+// manage (can_manage_employee in 01_foundation.sql).
+async function deleteRequestRow(table: "leave_requests" | "authorizations", id: string) {
+  const { supabase, user } = await currentEmployee();
+  if (!user) return "Not allowed";
+
+  const { data: request, error: loadError } = await supabase
+    .from(table)
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (loadError) return loadError.message;
+  if (!request) return "Request not found";
+
+  const { data: deleted, error } = await supabase.from(table).delete().eq("id", id).select("id");
+  if (error) return error.message;
+  if (!deleted?.length) return "Not allowed";
+  return null;
+}
+
 export async function deleteLeaveRequestRecord(id: string) {
-  const { supabase, user, employee } = await currentEmployee();
-  if (!user || !employee) return "Not allowed";
-
-  try {
-    const admin = createAdminClient();
-    // Read with the caller's client: RLS limits it to their company.
-    const { data: request, error: loadError } = await supabase
-      .from("leave_requests")
-      .select("id, employee_id, status")
-      .eq("id", id)
-      .maybeSingle();
-    if (loadError) return loadError.message;
-    if (!request) return "Request not found";
-
-    const ownPending =
-      request.employee_id === user.id && request.status === "pending";
-    if (!isStaff(employee.role) && !ownPending) {
-      return "Not allowed";
-    }
-
-    const { error } = await admin.from("leave_requests").delete().eq("id", id);
-    if (error) return error.message;
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : "Could not delete request";
-  }
+  return deleteRequestRow("leave_requests", id);
 }
 
 export async function deleteAuthorizationRecord(id: string) {
-  const { supabase, user, employee } = await currentEmployee();
-  if (!user || !employee) return "Not allowed";
-
-  try {
-    const admin = createAdminClient();
-    const { data: request, error: loadError } = await admin
-      .from("authorizations")
-      .select("id, employee_id, status")
-      .eq("id", id)
-      .maybeSingle();
-    if (loadError) return loadError.message;
-    if (!request) return "Request not found";
-
-    const ownPending =
-      request.employee_id === user.id && request.status === "pending";
-    if (!isStaff(employee.role) && !ownPending) {
-      return "Not allowed";
-    }
-    if (!(await sameCompanyEmployee(supabase, request.employee_id))) {
-      return "Request not found";
-    }
-
-    const { error } = await admin.from("authorizations").delete().eq("id", id);
-    if (error) return error.message;
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : "Could not delete request";
-  }
+  return deleteRequestRow("authorizations", id);
 }

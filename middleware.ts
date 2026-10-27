@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
+import { isWorkspaceRole } from '@/lib/roles'
 
 function copyCookies(from: NextResponse, to: NextResponse) {
   from.cookies.getAll().forEach(({ name, value }) => {
@@ -9,7 +10,7 @@ function copyCookies(from: NextResponse, to: NextResponse) {
 }
 
 function homeForRole(role: string | null | undefined) {
-  return role === 'admin' || role === 'manager' ? '/admin' : '/dashboard'
+  return isWorkspaceRole(role) ? '/admin' : '/dashboard'
 }
 
 function isAppPath(path: string) {
@@ -83,11 +84,11 @@ export async function middleware(request: NextRequest) {
     return replaceTo(home)
   }
 
-  if (employee.role === 'employee' && path.startsWith('/admin')) {
+  if (!isWorkspaceRole(employee.role) && path.startsWith('/admin')) {
     return replaceTo('/dashboard')
   }
 
-  if ((employee.role === 'admin' || employee.role === 'manager') && path.startsWith('/dashboard')) {
+  if (isWorkspaceRole(employee.role) && path.startsWith('/dashboard')) {
     return replaceTo('/admin')
   }
 

@@ -10,7 +10,7 @@
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -73,15 +73,15 @@ revoke insert, update, delete on public.leave_rate_changes from authenticated;
 drop policy if exists "leave_rate_changes_read" on public.leave_rate_changes;
 create policy "leave_rate_changes_read" on public.leave_rate_changes
 for select to authenticated using (
-  employee_id = auth.uid()
-  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+  employee_id = auth.uid() or public.can_manage_employee(employee_id)
 );
 
 -- ---------------------------------------------------------------------------
 -- Time-clock windows per employee and day (Tunis local "HH24:MI"): the
 -- schedule's work segments, the punch sessions and approved authorizations.
--- An employee reads their own; admin and manager read anyone of their
--- company, or all of it when p_employee_id is null.
+-- An employee reads their own; owner, admin and hr anyone of their company
+-- and a manager anyone of their departments (can_manage_employee), or all
+-- of those when p_employee_id is null.
 -- ---------------------------------------------------------------------------
 
 drop function if exists public.attendance_credit_windows(uuid, date, date);
@@ -114,10 +114,11 @@ begin
   if auth.uid() is null then
     raise exception using message = 'UNAUTHENTICATED';
   end if;
-  if (p_employee_id is null or p_employee_id <> auth.uid())
-    and not (
-      public.attendance_is_staff()
-      and (p_employee_id is null or public.is_my_org_employee(p_employee_id))
+  if (p_employee_id is null and not public.attendance_is_staff())
+    or (
+      p_employee_id is not null
+      and p_employee_id <> auth.uid()
+      and not public.can_manage_employee(p_employee_id)
     )
   then
     raise exception using message = 'FORBIDDEN';
@@ -130,6 +131,7 @@ begin
     select employee.id from public.employees employee
     where (p_employee_id is null or employee.id = p_employee_id)
       and employee.organization_id = public.current_org_id()
+      and (p_employee_id is not null or public.can_manage_employee(employee.id))
       and coalesce(employee.status, 'active') <> 'inactive'
   loop
     for day in select generate_series(p_from, p_to, interval '1 day')::date loop

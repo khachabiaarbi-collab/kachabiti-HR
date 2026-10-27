@@ -6,6 +6,7 @@ import {
   isBuiltInLeaveType,
   leaveTypeIssue,
 } from "@/lib/leave-policy-file";
+import { isHrRole } from "@/lib/roles";
 
 // Raised by leave_types_policy_guard (supabase/saas/03_company_settings.sql).
 function databaseMessage(message: string) {
@@ -19,8 +20,8 @@ function databaseMessage(message: string) {
 }
 
 /**
- * The signed-in active admin. Writes go through their own client, so RLS
- * keeps them to their company's catalog.
+ * The signed-in active owner, admin or hr. Writes go through their own
+ * client, so RLS keeps them to their company's catalog.
  */
 async function catalogAdmin() {
   const supabase = await createClient();
@@ -33,8 +34,8 @@ async function catalogAdmin() {
     .select("role, status")
     .eq("id", user.id)
     .maybeSingle();
-  if (!me || me.role !== "admin" || me.status === "inactive") {
-    return { error: "Only administrators can change the leave policy" } as const;
+  if (!me || !isHrRole(me.role) || me.status === "inactive") {
+    return { error: "Only the owner, administrators and HR can change the leave policy" } as const;
   }
   return { supabase } as const;
 }

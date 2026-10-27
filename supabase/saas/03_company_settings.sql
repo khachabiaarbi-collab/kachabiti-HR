@@ -24,7 +24,7 @@
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;

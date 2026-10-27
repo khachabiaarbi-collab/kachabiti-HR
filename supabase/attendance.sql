@@ -1,11 +1,12 @@
 -- Run after authorizations.sql. Attendance uses server time and controlled RPCs;
 -- employees never write the punch ledger directly.
 -- Needs supabase/saas/01_foundation.sql: settings and schedules belong to a
--- company, and staff only see and change their own company's attendance.
+-- company and are kept by owner, admin and hr; managers follow their
+-- departments' attendance (can_manage_employee).
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -254,7 +255,7 @@ as $$
     select 1
     from public.employees
     where id = target_id
-      and role in ('admin', 'manager')
+      and role in ('owner', 'admin', 'hr', 'manager')
       and coalesce(status, 'active') <> 'inactive'
   );
 $$;
@@ -542,7 +543,7 @@ begin
   if auth.uid() is null
     or (
       auth.uid() <> p_employee_id
-      and not (public.attendance_is_staff() and public.is_my_org_employee(p_employee_id))
+      and not public.can_manage_employee(p_employee_id)
     )
   then
     raise exception using message = 'FORBIDDEN';
@@ -870,7 +871,7 @@ begin
   from public.attendance_correction_requests
   where id = p_request_id
   for update;
-  if not found or not public.is_my_org_employee(request_row.employee_id) then
+  if not found or not public.can_manage_employee(request_row.employee_id) then
     raise exception using message = 'CORRECTION_NOT_FOUND';
   end if;
   if request_row.status <> 'pending' then
@@ -1048,6 +1049,7 @@ begin
     where punch.work_date between p_from and p_to
       and punch.voided_at is null
       and employee.organization_id = public.current_org_id()
+      and public.can_manage_employee(employee.id)
       and (p_employee_id is null or punch.employee_id = p_employee_id)
       and (p_department_id is null or employee.department_id = p_department_id)
     group by punch.employee_id, punch.work_date, employee.full_name,
@@ -1092,7 +1094,7 @@ declare
   assignment jsonb;
   make_default boolean;
 begin
-  if not public.attendance_is_staff() then
+  if not public.is_org_hr() then
     raise exception using message = 'FORBIDDEN';
   end if;
   if p_schedule is null
@@ -1213,8 +1215,8 @@ for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "attendance_settings_staff_write" on public.attendance_settings;
 create policy "attendance_settings_staff_write" on public.attendance_settings
 for all to authenticated
-using (organization_id = public.current_org_id() and public.attendance_is_staff())
-with check (organization_id = public.current_org_id() and public.attendance_is_staff());
+using (organization_id = public.current_org_id() and public.is_org_hr())
+with check (organization_id = public.current_org_id() and public.is_org_hr());
 
 drop policy if exists "work_schedules_read" on public.work_schedules;
 create policy "work_schedules_read" on public.work_schedules
@@ -1222,8 +1224,8 @@ for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "work_schedules_staff_write" on public.work_schedules;
 create policy "work_schedules_staff_write" on public.work_schedules
 for all to authenticated
-using (organization_id = public.current_org_id() and public.attendance_is_staff())
-with check (organization_id = public.current_org_id() and public.attendance_is_staff());
+using (organization_id = public.current_org_id() and public.is_org_hr())
+with check (organization_id = public.current_org_id() and public.is_org_hr());
 
 drop policy if exists "work_schedule_segments_read" on public.work_schedule_segments;
 create policy "work_schedule_segments_read" on public.work_schedule_segments
@@ -1238,7 +1240,7 @@ drop policy if exists "work_schedule_segments_staff_write" on public.work_schedu
 create policy "work_schedule_segments_staff_write" on public.work_schedule_segments
 for all to authenticated
 using (
-  public.attendance_is_staff()
+  public.is_org_hr()
   and exists (
     select 1 from public.work_schedules schedule
     where schedule.id = schedule_id
@@ -1246,7 +1248,7 @@ using (
   )
 )
 with check (
-  public.attendance_is_staff()
+  public.is_org_hr()
   and exists (
     select 1 from public.work_schedules schedule
     where schedule.id = schedule_id
@@ -1258,19 +1260,19 @@ drop policy if exists "schedule_assignments_read" on public.employee_schedule_as
 create policy "schedule_assignments_read" on public.employee_schedule_assignments
 for select to authenticated using (
   employee_id = auth.uid()
-  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+  or public.can_manage_employee(employee_id)
 );
 drop policy if exists "schedule_assignments_staff_write" on public.employee_schedule_assignments;
 create policy "schedule_assignments_staff_write" on public.employee_schedule_assignments
 for all to authenticated
-using (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
-with check (public.attendance_is_staff() and public.is_my_org_employee(employee_id));
+using (public.is_org_hr() and public.is_my_org_employee(employee_id))
+with check (public.is_org_hr() and public.is_my_org_employee(employee_id));
 
 drop policy if exists "attendance_punches_read" on public.attendance_punches;
 create policy "attendance_punches_read" on public.attendance_punches
 for select to authenticated using (
   employee_id = auth.uid()
-  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+  or public.can_manage_employee(employee_id)
 );
 
 drop policy if exists "attendance_corrections_read" on public.attendance_correction_requests;
@@ -1278,7 +1280,7 @@ create policy "attendance_corrections_read" on public.attendance_correction_requ
 for select to authenticated using (
   employee_id = auth.uid()
   or requester_id = auth.uid()
-  or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+  or public.can_manage_employee(employee_id)
 );
 drop policy if exists "attendance_corrections_submit" on public.attendance_correction_requests;
 create policy "attendance_corrections_submit" on public.attendance_correction_requests
@@ -1289,15 +1291,13 @@ for insert to authenticated with check (
   and decided_at is null
   and (
     employee_id = auth.uid()
-    or (public.attendance_is_staff() and public.is_my_org_employee(employee_id))
+    or public.can_manage_employee(employee_id)
   )
 );
 
 drop policy if exists "attendance_audit_staff_read" on public.attendance_audit_log;
 create policy "attendance_audit_staff_read" on public.attendance_audit_log
-for select to authenticated using (
-  public.attendance_is_staff() and public.is_my_org_employee(employee_id)
-);
+for select to authenticated using (public.can_manage_employee(employee_id));
 
 revoke all on function public.attendance_is_staff(uuid) from public;
 revoke all on function public.attendance_resolved_schedule(uuid, date) from public;
@@ -1330,7 +1330,9 @@ declare
   work_date_label text;
   staff_message text;
 begin
-  if to_regclass('public.notifications') is null then
+  -- notice_reviewer comes with notifications.sql, which may run later.
+  if to_regclass('public.notifications') is null
+     or to_regprocedure('public.notice_reviewer(uuid, uuid)') is null then
     return new;
   end if;
 
@@ -1353,13 +1355,8 @@ begin
     )
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
-    where employee.role in ('admin', 'manager')
-      and employee.organization_id = (
-        select subject.organization_id from public.employees as subject
-        where subject.id = new.employee_id
-      )
-      and employee.id is distinct from new.requester_id
-      and coalesce(employee.status, 'active') <> 'inactive';
+    where employee.id is distinct from new.requester_id
+      and public.notice_reviewer(employee.id, new.employee_id);
 
     insert into public.notifications (
       user_id, type, message, attendance_correction_id

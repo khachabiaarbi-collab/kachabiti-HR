@@ -18,6 +18,7 @@ import {
 } from "@/components/modals";
 import { CompanyContext, Logo } from "@/components/primitives";
 import { brandTheme } from "@/lib/company-profile-file";
+import { isAdminRole, isHrRole, normalizeRole } from "@/lib/roles";
 import { screenLabel, translateRole, useT } from "@/lib/i18n";
 import { useVacationBalances } from "@/lib/use-leave-hours";
 import type {
@@ -33,6 +34,7 @@ import type {
   Notice,
   NoticeFocus,
   Role,
+  WorkspaceAccess,
 } from "@/lib/app-types";
 import {
   mapAuthorization,
@@ -518,6 +520,26 @@ export default function Page() {
 
   const isEmployee = path.startsWith("/dashboard");
   const role: Role = toUiRole(currentEmployee?.role, isEmployee ? "Employee" : "Admin");
+  const access = useMemo<WorkspaceAccess>(() => {
+    const dbRole = normalizeRole(currentEmployee?.role);
+    const myId = currentEmployee?.id ?? null;
+    // Departments this person manages; managers approve for their members.
+    const managed = new Set(
+      departments.filter((department) => department.managerId === myId).map((department) => department.id),
+    );
+    const departmentOf = new Map(employees.map((employee) => [employee.id, employee.departmentId]));
+    return {
+      role: dbRole,
+      canEditCompany: isAdminRole(dbRole),
+      canEditPeople: isHrRole(dbRole),
+      canManageEmployee: (employeeId: string) => {
+        if (isHrRole(dbRole)) return departmentOf.has(employeeId);
+        if (dbRole !== "manager" || employeeId === myId) return false;
+        const departmentId = departmentOf.get(employeeId);
+        return Boolean(departmentId && managed.has(departmentId));
+      },
+    };
+  }, [currentEmployee?.role, currentEmployee?.id, departments, employees]);
 
   // One vacation balance everywhere: the ledger (opening − approved) plus what
   // the time clock has earned. Editing (EmployeeDetail) keeps the ledger.
@@ -636,7 +658,7 @@ export default function Page() {
           requests={requests}
           mobileOpen={mobileNavOpen}
           onCloseMobile={() => setMobileNavOpen(false)}
-          showPayroll={role === "Admin"}
+          showPayroll={access.canEditPeople}
         />
       )}
       <main className="main-content">
@@ -754,7 +776,7 @@ export default function Page() {
               noticeFocus={noticeFocus}
               onNoticeFocusHandled={() => setNoticeFocus(null)}
               reload={reload}
-              canManagePayroll={role === "Admin"}
+              access={access}
             />
           )}
         </div>
@@ -827,6 +849,7 @@ export default function Page() {
       {modal === "employee" && (
         <EmployeeModal
           departments={departments}
+          actorRole={access.role}
           close={() => setModal(null)}
           flash={flash}
           onInvited={async () => {
@@ -844,8 +867,10 @@ export default function Page() {
           leaveTypes={leaveTypes}
           balances={balances}
           vacation={vacation.figures?.get(selected.id) ?? null}
-          canManagePayroll={role === "Admin"}
-          canManageAccounts={role === "Admin"}
+          canManagePayroll={access.canEditPeople}
+          canManageAccounts={access.canEditCompany}
+          canEdit={access.canEditPeople}
+          actor={{ id: currentEmployee?.id ?? "", role: access.role }}
           close={() => setSelected(null)}
           flash={flash}
           onSaved={(employee, nextSolde) => {

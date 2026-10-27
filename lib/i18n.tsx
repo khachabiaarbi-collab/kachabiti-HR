@@ -113,7 +113,9 @@ export function translateStatus(t: Translate, status: string) {
 
 export function translateRole(t: Translate, role: string) {
   const value = role.toLowerCase();
+  if (value === "owner") return t("role.owner");
   if (value === "admin" || value === "administrator") return t("role.administrator");
+  if (value === "hr") return t("role.hr");
   if (value === "manager") return t("role.manager");
   if (value === "employee") return t("role.employee");
   return role;

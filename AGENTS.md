@@ -50,6 +50,7 @@ lib/payroll-run.ts           # Prepare / recalculate / lock a month (Supabase)
 lib/payroll-export.ts        # CSV exports (tested in payroll-export.test.ts)
 lib/leave-accrual.ts         # Vacation earned from the time clock (tested in leave-accrual.test.ts)
 lib/company-profile*.ts      # Company name, logo, colour, leave rate (Settings → Company Profile)
+lib/roles.ts                 # Owner / admin / hr / manager / employee rules (tested in roles.test.ts)
 lib/supabase/…               # browser, server, middleware clients
 middleware.ts
 ```
@@ -66,7 +67,10 @@ first and never `handle_new_user.sql`, `leave_types.sql` or
 payroll, …) require it and are limited to the company. Server actions
 that use the service role must check the target with `sameCompanyEmployee`
 (`lib/org-access.ts`). New SQL must scope by company: `current_org_id()`
-for company rows, `is_my_org_employee()` for rows tied to an employee.
+for company rows, `can_manage_employee()` for rows tied to an employee
+(managers: their departments only). Roles are owner, admin, hr, manager,
+employee; check them with `lib/roles.ts` in the app and `is_org_hr()` /
+`is_org_admin()` / `is_org_owner()` in SQL, never with role names.
 
 ## Auth
 

@@ -5,7 +5,7 @@
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -40,16 +40,15 @@ grant select, insert, update, delete on table public.authorizations to authentic
 drop policy if exists "authorizations_select_own_or_staff" on public.authorizations;
 drop policy if exists "authorizations_insert_own_pending" on public.authorizations;
 drop policy if exists "authorizations_update_staff" on public.authorizations;
+drop policy if exists "authorizations_delete_own_pending_or_managed" on public.authorizations;
 
--- Employees read their own rows; admin/manager read their company's.
+-- Employees read their own rows; owner, admin and hr the company's; a
+-- manager their departments' (can_manage_employee, 01_foundation.sql).
 create policy "authorizations_select_own_or_staff"
 on public.authorizations
 for select
 to authenticated
-using (
-  employee_id = auth.uid()
-  or (public.is_org_staff() and public.is_my_org_employee(employee_id))
-);
+using (employee_id = auth.uid() or public.can_manage_employee(employee_id));
 
 -- Employees open their own pending requests only.
 create policy "authorizations_insert_own_pending"
@@ -62,10 +61,20 @@ with check (
   and approver_id is null
 );
 
--- Staff approve or reject within their company.
+-- The same people approve or reject.
 create policy "authorizations_update_staff"
 on public.authorizations
 for update
 to authenticated
-using (public.is_org_staff() and public.is_my_org_employee(employee_id))
-with check (public.is_org_staff() and public.is_my_org_employee(employee_id));
+using (public.can_manage_employee(employee_id))
+with check (public.can_manage_employee(employee_id));
+
+-- Withdraw your own pending request, or delete one you manage.
+create policy "authorizations_delete_own_pending_or_managed"
+on public.authorizations
+for delete
+to authenticated
+using (
+  (employee_id = auth.uid() and status = 'pending')
+  or public.can_manage_employee(employee_id)
+);

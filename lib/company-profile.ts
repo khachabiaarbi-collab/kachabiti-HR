@@ -9,10 +9,11 @@ import {
   normalizeBrandColor,
   type CompanyProfileInput,
 } from "@/lib/company-profile-file";
+import { isAdminRole } from "@/lib/roles";
 
 const BUCKET = "company-logos";
 
-/** The signed-in active admin's company; other people get an error. */
+/** The signed-in active owner's or admin's company; others get an error. */
 async function companyAdmin() {
   const supabase = await createClient();
   const {
@@ -25,8 +26,8 @@ async function companyAdmin() {
     .select("role, status, organization_id")
     .eq("id", user.id)
     .maybeSingle();
-  if (!me || me.role !== "admin" || me.status === "inactive" || !me.organization_id) {
-    return { error: "Only administrators can change the company profile" } as const;
+  if (!me || !isAdminRole(me.role) || me.status === "inactive" || !me.organization_id) {
+    return { error: "Only the owner and administrators can change the company profile" } as const;
   }
   return { supabase, organizationId: String(me.organization_id) } as const;
 }

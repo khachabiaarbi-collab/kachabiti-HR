@@ -1,11 +1,12 @@
 -- Run in the SQL editor. In-app bell notices for leave requests,
 -- authorizations, and attendance corrections (submit / approve / reject),
--- one row per recipient. Needs supabase/saas/01_foundation.sql: staff are
--- only told about requests from their own company.
+-- one row per recipient. Needs supabase/saas/01_foundation.sql: owner,
+-- admin and hr hear about their company's requests, a manager about their
+-- departments' (notice_reviewer).
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -114,6 +115,39 @@ as $$
   where id = target_id;
 $$;
 
+-- Who is told about a new request of p_subject: owner, admin and hr of the
+-- company, and the manager of the subject's department (never the subject).
+create or replace function public.notice_reviewer(p_reviewer uuid, p_subject uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.employees reviewer
+    join public.employees subject
+      on subject.id = p_subject and subject.organization_id = reviewer.organization_id
+    where reviewer.id = p_reviewer
+      and reviewer.id <> subject.id
+      and coalesce(reviewer.status, 'active') <> 'inactive'
+      and (
+        reviewer.role in ('owner', 'admin', 'hr')
+        or (
+          reviewer.role = 'manager'
+          and exists (
+            select 1 from public.departments department
+            where department.id = subject.department_id
+              and department.manager_id = reviewer.id
+          )
+        )
+      )
+  );
+$$;
+
+revoke all on function public.notice_reviewer(uuid, uuid) from public, anon, authenticated;
+
 create or replace function public.notify_leave_request()
 returns trigger
 language plpgsql
@@ -136,13 +170,7 @@ begin
     insert into public.notifications (user_id, type, message, leave_request_id)
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
-    where employee.role in ('admin', 'manager')
-      and employee.organization_id = (
-        select requester.organization_id from public.employees as requester
-        where requester.id = new.employee_id
-      )
-      and employee.id is distinct from new.employee_id
-      and coalesce(employee.status, 'active') <> 'inactive';
+    where public.notice_reviewer(employee.id, new.employee_id);
 
     insert into public.notifications (user_id, type, message, leave_request_id)
     values (
@@ -187,13 +215,7 @@ begin
     insert into public.notifications (user_id, type, message, authorization_id)
     select employee.id, 'pending', staff_message, new.id
     from public.employees as employee
-    where employee.role in ('admin', 'manager')
-      and employee.organization_id = (
-        select requester.organization_id from public.employees as requester
-        where requester.id = new.employee_id
-      )
-      and employee.id is distinct from new.employee_id
-      and coalesce(employee.status, 'active') <> 'inactive';
+    where public.notice_reviewer(employee.id, new.employee_id);
 
     insert into public.notifications (user_id, type, message, authorization_id)
     values (

@@ -15,9 +15,10 @@ import { createClient } from "@/lib/supabase/client";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Logo } from "@/components/primitives";
 import { useT } from "@/lib/i18n";
+import { isWorkspaceRole } from "@/lib/roles";
 
 function homeForRole(role: string | null | undefined) {
-  return role === "admin" || role === "manager" ? "/admin" : "/dashboard";
+  return isWorkspaceRole(role) ? "/admin" : "/dashboard";
 }
 
 function passwordLinkFromHash() {

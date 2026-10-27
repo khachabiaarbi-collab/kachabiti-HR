@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isWorkspaceRole } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type {
   AttendanceCorrectionRequest,
@@ -123,7 +124,8 @@ export async function requireAttendanceAuth(
     throw new AttendanceServerError("FORBIDDEN", 403, ERROR_MESSAGES.FORBIDDEN);
   }
 
-  const isStaff = profile.role === "admin" || profile.role === "manager";
+  // Managers see their departments only; the database functions narrow it.
+  const isStaff = isWorkspaceRole(profile.role);
   if (staffOnly && !isStaff) {
     throw new AttendanceServerError("FORBIDDEN", 403, ERROR_MESSAGES.FORBIDDEN);
   }

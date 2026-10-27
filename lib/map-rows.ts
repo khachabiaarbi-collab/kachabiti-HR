@@ -59,9 +59,17 @@ function colorForId(id: string) {
 }
 
 export function displayRole(role: string) {
+  if (role === "owner") return "Owner";
   if (role === "admin") return "Administrator";
+  if (role === "hr") return "HR";
   if (role === "manager") return "Manager";
-  if (role === "Administrator" || role === "Manager" || role === "Employee") {
+  if (
+    role === "Owner" ||
+    role === "Administrator" ||
+    role === "HR" ||
+    role === "Manager" ||
+    role === "Employee"
+  ) {
     return role;
   }
   return "Employee";
@@ -69,6 +77,8 @@ export function displayRole(role: string) {
 
 export function toUiRole(role: string | undefined, fallback: Role): Role {
   const value = (role || "").toLowerCase();
+  if (value === "owner") return "Owner";
+  if (value === "hr") return "HR";
   if (value === "manager") return "Manager";
   if (value === "admin" || value === "administrator") return "Admin";
   if (value === "employee") return "Employee";
@@ -623,7 +633,9 @@ export function openingEmployeeSolde(
 
 export function toDbRole(role: string) {
   const value = role.toLowerCase();
+  if (value === "owner") return "owner";
   if (value === "admin" || value === "administrator") return "admin";
+  if (value === "hr") return "hr";
   if (value === "manager") return "manager";
   return "employee";
 }

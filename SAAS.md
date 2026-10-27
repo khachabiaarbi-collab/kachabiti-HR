@@ -11,8 +11,8 @@ production.
 | 1 | Companies, company on core tables, RLS, new-user trigger | **done** |
 | 2 | Company on attendance, authorizations, payroll, notifications, storage | **done** |
 | 3 | Per-company settings: name, logo, colors, CNSS / tax id, timezone, leave and payroll rules | **done** (timezone deferred) |
-| 4 | Roles and permissions per company (owner, admin, HR, manager, employee) | next |
-| 5 | Sign-up "Create my company", setup wizard, employee import | |
+| 4 | Roles and permissions per company (owner, admin, HR, manager, employee) | **done** |
+| 5 | Sign-up "Create my company", setup wizard, employee import | next |
 | 6 | KAN super-admin console (customers, suspend, usage) | |
 | 7 | Plans, trial and billing | |
 | 8 | Company sub-domains | |
@@ -153,6 +153,59 @@ Deferred from step 3:
   rules, assume `Africa/Tunis` (`attendance_settings` only allows it).
 - A logo for RHFlow itself (the sign-in screen shows a letter mark).
 
+## Step 4: what exists
+
+Roles, the same for every company:
+
+| | Owner | Admin | HR | Manager | Employee |
+|---|---|---|---|---|---|
+| Company profile, branding | ✓ | ✓ | | | |
+| Leave policy, departments, events, schedules, work sites | ✓ | ✓ | ✓ | read | |
+| Invite and edit people, balances | ✓ | ✓ | ✓ | read | own contact details |
+| Approve leave, authorizations, corrections | everyone | everyone | everyone | their departments, not themselves | |
+| Attendance reports, notices of new requests | everyone | everyone | everyone | their departments | own |
+| Payroll | ✓ | ✓ | ✓ | | own payslips |
+| Give the hr, manager, employee roles | ✓ | ✓ | | | |
+| Make admins, transfer ownership | ✓ | | | | |
+
+A manager's team is the employees of the departments whose `manager_id` is
+them. The owner is unique per company, always active and never deleted; it
+only changes through `transfer_ownership()` to an active admin.
+
+Database ([`01_foundation.sql`](supabase/saas/01_foundation.sql) and the
+feature scripts):
+
+- Helpers `org_role()`, `is_org_owner()`, `is_org_admin()` (owner, admin),
+  `is_org_hr()` (owner, admin, hr), `is_org_staff()` (+ manager),
+  `can_manage_employee(id)` (hr and above: the company; manager: their
+  departments, never themselves). Every rule on employee rows (requests,
+  balances, authorizations, punches, corrections, schedule assignments,
+  audits, rate history, leave attachments) uses `can_manage_employee`.
+- `employees_role_check`, one owner per company (`employees_one_owner_per_org`),
+  and `employees_guard`: who may change a role or a status
+  (`ROLE_NOT_ALLOWED`, `OWNER_TRANSFER_ONLY`, `OWNER_CANNOT_BE_DEACTIVATED`).
+- New companies start with an owner (sign-up and `create_organization`).
+  Companies from before step 4: the earliest active admin becomes the owner.
+- `notice_reviewer()` (notifications.sql) picks who hears about a new
+  request; `payroll_is_admin()` now means owner, admin or hr.
+- Authorizations can be deleted with the user's own client (own pending, or
+  managed); the app no longer uses the service role for request deletions.
+
+App: [`lib/roles.ts`](lib/roles.ts) (tested in `roles.test.ts`) holds the
+same rules for server actions, the middleware and the screens;
+`WorkspaceAccess` (built in `app/page.tsx`) tells each screen what the
+signed-in person may do. Managers see approve buttons only for their team,
+a read-only employee panel, Settings without the Attendance tab, no
+Payroll. The employee panel offers only the roles you may give, locks the
+owner's and (for admins) other admins' status, and lets the owner hand
+ownership to an admin ("Make owner"). Approvals report an error when the
+database blocks them instead of showing "Approved".
+
+Known trade-off: approving leave deducts the balance from the approver's
+browser session, so a manager may write their team's `leave_balances`
+(only HR and above can edit balances in the app). Moving the approval into
+one database function would remove that.
+
 Still open (later steps):
 
 - Avatars are in a public bucket: a photo URL works for anyone who has it
@@ -180,10 +233,11 @@ Still open (later steps):
    On a project set up before step 2, run the same list again in the same
    order: the scripts migrate what is there.
 2. Run `supabase/saas/tests/01_isolation.sql`,
-   `supabase/saas/tests/02_isolation.sql` and
-   `supabase/saas/tests/03_isolation.sql`. They must end with
-   `All isolation checks passed`, `All step 2 isolation checks passed` and
-   `All step 3 checks passed`.
+   `supabase/saas/tests/02_isolation.sql`,
+   `supabase/saas/tests/03_isolation.sql` and
+   `supabase/saas/tests/04_roles.sql`. They must end with
+   `All isolation checks passed`, `All step 2 isolation checks passed`,
+   `All step 3 checks passed` and `All step 4 role checks passed`.
    Each runs in a transaction that is rolled back, so it leaves nothing
    behind.
 3. Authentication → Users → Add user (email + password, auto-confirm), then

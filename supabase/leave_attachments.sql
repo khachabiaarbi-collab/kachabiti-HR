@@ -1,10 +1,11 @@
 -- Run once in the Supabase SQL editor so leave request files can be stored.
--- Files live under <employee id>/…; a person reads their own, staff read their
--- company's. Needs supabase/saas/01_foundation.sql.
+-- Files live under <employee id>/…; a person reads their own, and whoever
+-- approves for them reads theirs (can_manage_employee). Needs
+-- supabase/saas/01_foundation.sql.
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -38,13 +39,10 @@ using (
   bucket_id = 'leave-attachments'
   and (
     (storage.foldername(name))[1] = auth.uid()::text
-    or (
-      public.is_org_staff()
-      and exists (
-        select 1 from public.employees as owner
-        where owner.id::text = (storage.foldername(name))[1]
-          and owner.organization_id = public.current_org_id()
-      )
+    or exists (
+      select 1 from public.employees as owner
+      where owner.id::text = (storage.foldername(name))[1]
+        and public.can_manage_employee(owner.id)
     )
   )
 );

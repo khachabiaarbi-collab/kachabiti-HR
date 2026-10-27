@@ -1,6 +1,14 @@
 -- Work sites used to restrict employee punches to the office (GPS).
 -- Run after supabase/attendance.sql. Each company has its own sites.
 
+do $$
+begin
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
+    raise exception 'Run supabase/saas/01_foundation.sql first.';
+  end if;
+end;
+$$;
+
 create table if not exists public.work_locations (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(trim(name)) between 1 and 80),
@@ -48,5 +56,5 @@ for select to authenticated using (organization_id = public.current_org_id());
 drop policy if exists "work_locations_staff_write" on public.work_locations;
 create policy "work_locations_staff_write" on public.work_locations
 for all to authenticated
-using (organization_id = public.current_org_id() and public.is_org_staff())
-with check (organization_id = public.current_org_id() and public.is_org_staff());
+using (organization_id = public.current_org_id() and public.is_org_hr())
+with check (organization_id = public.current_org_id() and public.is_org_hr());

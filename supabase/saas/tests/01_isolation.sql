@@ -46,8 +46,8 @@ begin
   if org_a is null or org_b is null or org_a = org_b then
     raise exception 'ISOLATION FAILED: sign-up did not create two separate companies';
   end if;
-  if (select role from public.employees where id = '00000000-0000-4000-8000-00000000a001') <> 'admin' then
-    raise exception 'ISOLATION FAILED: the sign-up user is not admin of their company';
+  if (select role from public.employees where id = '00000000-0000-4000-8000-00000000a001') <> 'owner' then
+    raise exception 'ISOLATION FAILED: the sign-up user is not owner of their company';
   end if;
   if (select organization_id from public.employees where id = '00000000-0000-4000-8000-00000000a002') is distinct from org_a then
     raise exception 'ISOLATION FAILED: the invited employee did not join company A';

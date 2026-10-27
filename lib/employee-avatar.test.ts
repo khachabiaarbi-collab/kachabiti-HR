@@ -49,8 +49,12 @@ test("canChangeEmployeePhoto: self, staff, and refusals", () => {
     true,
   );
   assert.equal(
-    canChangeEmployeePhoto({ id: employeeId, role: "manager", status: "active" }, otherId),
+    canChangeEmployeePhoto({ id: employeeId, role: "hr", status: "active" }, otherId),
     true,
+  );
+  assert.equal(
+    canChangeEmployeePhoto({ id: employeeId, role: "manager", status: "active" }, otherId),
+    false,
   );
   assert.equal(
     canChangeEmployeePhoto({ id: employeeId, role: "employee", status: "active" }, otherId),

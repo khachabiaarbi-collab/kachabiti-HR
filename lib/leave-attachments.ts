@@ -2,13 +2,9 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { sameCompanyEmployee } from "@/lib/org-access";
 
 const BUCKET = "leave-attachments";
 
-function isStaff(role: string | null | undefined) {
-  return role === "admin" || role === "manager";
-}
 
 export async function uploadLeaveAttachment(formData: FormData) {
   const supabase = await createClient();
@@ -68,9 +64,13 @@ export async function getLeaveAttachmentUrl(path: string) {
     .maybeSingle();
   if (!employee) return null;
 
+  // Your own files, or those of someone you approve for (owner, admin and
+  // hr: the company; a manager: their departments).
   const ownerId = path.split("/")[0];
-  if (!isStaff(employee.role) && ownerId !== user.id) return null;
-  if (ownerId !== user.id && !(await sameCompanyEmployee(supabase, ownerId))) return null;
+  if (ownerId !== user.id) {
+    const { data: allowed } = await supabase.rpc("can_manage_employee", { target_id: ownerId });
+    if (allowed !== true) return null;
+  }
 
   try {
     const admin = createAdminClient();

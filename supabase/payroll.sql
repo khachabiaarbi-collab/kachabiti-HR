@@ -1,8 +1,8 @@
 -- Payroll (fiche de paie): contracts, yearly rates, pay components, monthly
 -- runs and payslips. Run once in the Supabase SQL editor; safe to re-run.
 --
--- Access: salary data is visible to active admins only. Managers do not see
--- contracts or payslips. Employees read their own payslips once the month is
+-- Access: salary data is visible to active owners, admins and hr only.
+-- Managers do not see contracts or payslips. Employees read their own payslips once the month is
 -- validated. Amounts are in TND with 3 decimals (millimes).
 --
 -- Needs supabase/saas/01_foundation.sql: rates, pay components, runs and
@@ -10,7 +10,7 @@
 
 do $$
 begin
-  if to_regprocedure('public.is_my_org_employee(uuid)') is null then
+  if to_regprocedure('public.can_manage_employee(uuid)') is null then
     raise exception 'Run supabase/saas/01_foundation.sql first.';
   end if;
 end;
@@ -70,7 +70,7 @@ as $$
     select 1
     from public.employees
     where id = target_id
-      and role = 'admin'
+      and role in ('owner', 'admin', 'hr')
       and coalesce(status, 'active') <> 'inactive'
   );
 $$;

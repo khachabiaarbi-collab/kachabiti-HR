@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { sameCompanyEmployee } from "@/lib/org-access";
+import { canManageAccountOf, isAdminRole, isHrRole } from "@/lib/roles";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -26,11 +27,18 @@ export async function updateEmployeeAccount(input: {
     .select("role, status")
     .eq("id", user.id)
     .maybeSingle();
-  if (!me || me.role !== "admin" || me.status === "inactive") {
-    return "Only administrators can change an employee's account.";
+  if (!me || !isAdminRole(me.role) || me.status === "inactive") {
+    return "Only the owner and administrators can change an employee's account.";
   }
-  if (!(await sameCompanyEmployee(supabase, input.employeeId))) {
-    return "Employee not found.";
+  // RLS only returns colleagues of the same company.
+  const { data: target } = await supabase
+    .from("employees")
+    .select("id, role")
+    .eq("id", input.employeeId)
+    .maybeSingle();
+  if (!target) return "Employee not found.";
+  if (!canManageAccountOf({ id: user.id, role: me.role }, target)) {
+    return "Only the owner can change an administrator's or the owner's account.";
   }
 
   const email = input.email?.trim().toLowerCase();
@@ -76,8 +84,8 @@ export async function saveEmployeeSolde(input: {
     .select("role, status")
     .eq("id", user.id)
     .maybeSingle();
-  if (!me || (me.role !== "admin" && me.role !== "manager") || me.status === "inactive") {
-    return "Only administrators and managers can change leave balances.";
+  if (!me || !isHrRole(me.role) || me.status === "inactive") {
+    return "Only the owner, administrators and HR can change leave balances.";
   }
   if (!(await sameCompanyEmployee(supabase, input.employeeId))) {
     return "Employee not found.";

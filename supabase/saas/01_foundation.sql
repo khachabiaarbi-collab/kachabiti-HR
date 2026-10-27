@@ -231,7 +231,29 @@ as $$
   select organization_id from public.employees where id = auth.uid();
 $$;
 
--- Active admin or manager of their company.
+-- Roles (SaaS step 4), from most to least access:
+--   owner    one per company; everything an admin can do, cannot be
+--            demoted, deactivated or deleted (ownership is transferred);
+--   admin    company profile, roles hr / manager / employee, everything below;
+--   hr       people, balances, leave policy, departments, events, schedules,
+--            work sites, every approval, attendance and payroll;
+--   manager  approves and follows the employees of the departments they
+--            manage (not their own requests);
+--   employee self-service.
+
+-- The signed-in user's role when active, else null.
+create or replace function public.org_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from public.employees
+  where id = auth.uid() and coalesce(status, 'active') <> 'inactive';
+$$;
+
+-- Active owner, admin, hr or manager: opens the admin workspace.
 create or replace function public.is_org_staff()
 returns boolean
 language sql
@@ -239,15 +261,10 @@ stable
 security definer
 set search_path = public
 as $$
-  select exists (
-    select 1 from public.employees
-    where id = auth.uid()
-      and role in ('admin', 'manager')
-      and coalesce(status, 'active') <> 'inactive'
-  );
+  select coalesce(public.org_role() in ('owner', 'admin', 'hr', 'manager'), false);
 $$;
 
--- Active admin of their company.
+-- Active owner or admin.
 create or replace function public.is_org_admin()
 returns boolean
 language sql
@@ -255,11 +272,60 @@ stable
 security definer
 set search_path = public
 as $$
+  select coalesce(public.org_role() in ('owner', 'admin'), false);
+$$;
+
+-- Active owner.
+create or replace function public.is_org_owner()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(public.org_role() = 'owner', false);
+$$;
+
+-- Active owner, admin or hr: manages the whole company's people.
+create or replace function public.is_org_hr()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(public.org_role() in ('owner', 'admin', 'hr'), false);
+$$;
+
+-- The signed-in user may approve and follow this employee: owner, admin and
+-- hr for anyone in their company; a manager for the other members of the
+-- departments they manage.
+create or replace function public.can_manage_employee(target_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
   select exists (
-    select 1 from public.employees
-    where id = auth.uid()
-      and role = 'admin'
-      and coalesce(status, 'active') <> 'inactive'
+    select 1
+    from public.employees me
+    join public.employees target
+      on target.id = target_id and target.organization_id = me.organization_id
+    where me.id = auth.uid()
+      and coalesce(me.status, 'active') <> 'inactive'
+      and (
+        me.role in ('owner', 'admin', 'hr')
+        or (
+          me.role = 'manager'
+          and target.id <> me.id
+          and exists (
+            select 1 from public.departments department
+            where department.id = target.department_id
+              and department.manager_id = me.id
+          )
+        )
+      )
   );
 $$;
 
@@ -281,9 +347,51 @@ as $$
 $$;
 
 grant execute on function public.current_org_id() to authenticated;
+grant execute on function public.org_role() to authenticated;
 grant execute on function public.is_org_staff() to authenticated;
 grant execute on function public.is_org_admin() to authenticated;
+grant execute on function public.is_org_owner() to authenticated;
+grant execute on function public.is_org_hr() to authenticated;
+grant execute on function public.can_manage_employee(uuid) to authenticated;
 grant execute on function public.is_my_org_employee(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Roles and the company owner
+-- ---------------------------------------------------------------------------
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.employees'::regclass
+      and conname = 'employees_role_check'
+  ) then
+    alter table public.employees
+      add constraint employees_role_check
+      check (role in ('owner', 'admin', 'hr', 'manager', 'employee')) not valid;
+  end if;
+end;
+$$;
+
+-- A company without an owner (created before step 4): its earliest admin
+-- becomes the owner.
+update public.employees as employee
+set role = 'owner'
+where employee.id in (
+  select distinct on (candidate.organization_id) candidate.id
+  from public.employees candidate
+  where candidate.role = 'admin'
+    and coalesce(candidate.status, 'active') <> 'inactive'
+    and not exists (
+      select 1 from public.employees owner
+      where owner.organization_id = candidate.organization_id and owner.role = 'owner'
+    )
+  order by candidate.organization_id, candidate.created_at, candidate.id
+);
+
+create unique index if not exists employees_one_owner_per_org
+  on public.employees (organization_id)
+  where role = 'owner';
 
 -- ---------------------------------------------------------------------------
 -- Filling in and protecting the company column
@@ -333,7 +441,9 @@ before insert or update on public.leave_requests
 for each row execute function public.leave_row_company();
 
 -- A company never changes once set; departments and managers must stay in
--- the same company; employees cannot change their own access fields.
+-- the same company; people below hr cannot change their own access fields;
+-- role and status changes follow the role rules. The service role
+-- (auth.uid() null) is trusted; so is transfer_ownership().
 create or replace function public.employees_guard()
 returns trigger
 language plpgsql
@@ -342,12 +452,13 @@ set search_path = public
 as $$
 declare
   department_org uuid;
+  checked boolean := auth.uid() is not null
+    and current_setting('rhflow.ownership_transfer', true) is distinct from 'on';
 begin
   if tg_op = 'UPDATE' then
     new.organization_id := old.organization_id;
-    -- Signed-in employees who are not staff may only edit their own
-    -- contact details (the service role, auth.uid() null, is trusted).
-    if auth.uid() is not null and not public.is_org_staff() then
+    -- Below hr, signed-in people may only edit their own contact details.
+    if checked and not public.is_org_hr() then
       new.role := old.role;
       new.status := old.status;
       new.email := old.email;
@@ -355,6 +466,34 @@ begin
       new.start_date := old.start_date;
       new.monthly_leave_days := old.monthly_leave_days;
       new.job_title := old.job_title;
+    end if;
+  end if;
+
+  if checked then
+    if tg_op = 'INSERT' then
+      if new.role = 'owner'
+         or (new.role = 'admin' and not public.is_org_owner())
+         or (new.role in ('hr', 'manager') and not public.is_org_admin()) then
+        raise exception 'ROLE_NOT_ALLOWED' using errcode = '42501';
+      end if;
+    else
+      if new.role is distinct from old.role then
+        if old.role = 'owner' or new.role = 'owner' then
+          raise exception 'OWNER_TRANSFER_ONLY' using errcode = '42501';
+        end if;
+        if not public.is_org_admin()
+           or ((old.role = 'admin' or new.role = 'admin') and not public.is_org_owner()) then
+          raise exception 'ROLE_NOT_ALLOWED' using errcode = '42501';
+        end if;
+      end if;
+      if new.status is distinct from old.status then
+        if old.role = 'owner' then
+          raise exception 'OWNER_CANNOT_BE_DEACTIVATED' using errcode = '42501';
+        end if;
+        if old.role = 'admin' and not public.is_org_owner() then
+          raise exception 'ROLE_NOT_ALLOWED' using errcode = '42501';
+        end if;
+      end if;
     end if;
   end if;
   if new.department_id is not null then
@@ -450,71 +589,83 @@ create policy "organizations: admins update their company" on public.organizatio
 
 create policy "employees: read colleagues" on public.employees
   for select to authenticated using (organization_id = public.current_org_id());
-create policy "employees: staff add" on public.employees
+create policy "employees: hr add" on public.employees
   for insert to authenticated
-  with check (organization_id = public.current_org_id() and public.is_org_staff());
-create policy "employees: self or staff update" on public.employees
+  with check (organization_id = public.current_org_id() and public.is_org_hr());
+create policy "employees: self or hr update" on public.employees
   for update to authenticated
-  using (organization_id = public.current_org_id() and (id = auth.uid() or public.is_org_staff()))
+  using (organization_id = public.current_org_id() and (id = auth.uid() or public.is_org_hr()))
   with check (organization_id = public.current_org_id());
+-- Never the owner; an admin only by the owner.
 create policy "employees: admins remove others" on public.employees
   for delete to authenticated
-  using (organization_id = public.current_org_id() and public.is_org_admin() and id <> auth.uid());
+  using (
+    organization_id = public.current_org_id()
+    and public.is_org_admin()
+    and id <> auth.uid()
+    and role <> 'owner'
+    and (role <> 'admin' or public.is_org_owner())
+  );
 
 create policy "departments: read" on public.departments
   for select to authenticated using (organization_id = public.current_org_id());
-create policy "departments: staff write" on public.departments
+create policy "departments: hr write" on public.departments
   for all to authenticated
-  using (organization_id = public.current_org_id() and public.is_org_staff())
-  with check (organization_id = public.current_org_id() and public.is_org_staff());
+  using (organization_id = public.current_org_id() and public.is_org_hr())
+  with check (organization_id = public.current_org_id() and public.is_org_hr());
 
 create policy "leave_types: read" on public.leave_types
   for select to authenticated using (organization_id = public.current_org_id());
-create policy "leave_types: admins write" on public.leave_types
+create policy "leave_types: hr write" on public.leave_types
   for all to authenticated
-  using (organization_id = public.current_org_id() and public.is_org_admin())
-  with check (organization_id = public.current_org_id() and public.is_org_admin());
+  using (organization_id = public.current_org_id() and public.is_org_hr())
+  with check (organization_id = public.current_org_id() and public.is_org_hr());
 
-create policy "leave_balances: own or staff read" on public.leave_balances
+create policy "leave_balances: own or managed read" on public.leave_balances
   for select to authenticated
-  using (organization_id = public.current_org_id() and (employee_id = auth.uid() or public.is_org_staff()));
-create policy "leave_balances: staff write" on public.leave_balances
+  using (
+    organization_id = public.current_org_id()
+    and (employee_id = auth.uid() or public.can_manage_employee(employee_id))
+  );
+-- Approving leave deducts the balance from the approver's session, so a
+-- manager writes their team's balances; the app only lets hr edit them.
+create policy "leave_balances: managed write" on public.leave_balances
   for all to authenticated
-  using (organization_id = public.current_org_id() and public.is_org_staff())
-  with check (organization_id = public.current_org_id() and public.is_org_staff());
+  using (organization_id = public.current_org_id() and public.can_manage_employee(employee_id))
+  with check (organization_id = public.current_org_id() and public.can_manage_employee(employee_id));
 
 -- Everyone in the company sees requests (team calendar), as before.
 create policy "leave_requests: read" on public.leave_requests
   for select to authenticated using (organization_id = public.current_org_id());
-create policy "leave_requests: own pending or staff create" on public.leave_requests
+create policy "leave_requests: own pending or managed create" on public.leave_requests
   for insert to authenticated
   with check (
     organization_id = public.current_org_id()
-    and (public.is_org_staff() or (employee_id = auth.uid() and status = 'pending'))
+    and (public.can_manage_employee(employee_id) or (employee_id = auth.uid() and status = 'pending'))
   );
-create policy "leave_requests: own pending or staff update" on public.leave_requests
+create policy "leave_requests: own pending or managed update" on public.leave_requests
   for update to authenticated
   using (
     organization_id = public.current_org_id()
-    and (public.is_org_staff() or (employee_id = auth.uid() and status = 'pending'))
+    and (public.can_manage_employee(employee_id) or (employee_id = auth.uid() and status = 'pending'))
   )
   with check (
     organization_id = public.current_org_id()
-    and (public.is_org_staff() or (employee_id = auth.uid() and status = 'pending'))
+    and (public.can_manage_employee(employee_id) or (employee_id = auth.uid() and status = 'pending'))
   );
-create policy "leave_requests: own pending or staff delete" on public.leave_requests
+create policy "leave_requests: own pending or managed delete" on public.leave_requests
   for delete to authenticated
   using (
     organization_id = public.current_org_id()
-    and (public.is_org_staff() or (employee_id = auth.uid() and status = 'pending'))
+    and (public.can_manage_employee(employee_id) or (employee_id = auth.uid() and status = 'pending'))
   );
 
 create policy "events: read" on public.events
   for select to authenticated using (organization_id = public.current_org_id());
-create policy "events: staff write" on public.events
+create policy "events: hr write" on public.events
   for all to authenticated
-  using (organization_id = public.current_org_id() and public.is_org_staff())
-  with check (organization_id = public.current_org_id() and public.is_org_staff());
+  using (organization_id = public.current_org_id() and public.is_org_hr())
+  with check (organization_id = public.current_org_id() and public.is_org_hr());
 
 -- ---------------------------------------------------------------------------
 -- Default leave catalog for a new company
@@ -548,7 +699,7 @@ as $$
 $$;
 
 -- Creates a company with its leave catalog and makes an existing Auth user
--- its admin. Run from the SQL editor to set up a company by hand, e.g.
+-- its owner. Run from the SQL editor to set up a company by hand, e.g.
 --   select public.create_organization('Acme', 'owner@acme.com');
 create or replace function public.create_organization(p_name text, p_admin_email text)
 returns uuid
@@ -577,13 +728,46 @@ begin
     org,
     coalesce(admin_user.raw_user_meta_data->>'full_name', split_part(admin_user.email, '@', 1)),
     admin_user.email,
-    'admin'
+    'owner'
   );
   return org;
 end;
 $$;
 
 revoke all on function public.create_organization(text, text) from public, anon, authenticated;
+
+-- The owner hands the company to another active admin of it and becomes an
+-- admin. There is always exactly one owner.
+create or replace function public.transfer_ownership(p_new_owner uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me public.employees%rowtype;
+  target public.employees%rowtype;
+begin
+  select * into me from public.employees where id = auth.uid();
+  if me.id is null or me.role <> 'owner' or coalesce(me.status, 'active') = 'inactive' then
+    raise exception 'OWNER_ONLY' using errcode = '42501';
+  end if;
+  select * into target from public.employees
+  where id = p_new_owner and organization_id = me.organization_id;
+  if target.id is null or target.id = me.id
+     or target.role <> 'admin' or coalesce(target.status, 'active') = 'inactive' then
+    raise exception 'NEW_OWNER_MUST_BE_ACTIVE_ADMIN' using errcode = '22023';
+  end if;
+
+  perform set_config('rhflow.ownership_transfer', 'on', true);
+  update public.employees set role = 'admin' where id = me.id;
+  update public.employees set role = 'owner' where id = target.id;
+  perform set_config('rhflow.ownership_transfer', 'off', true);
+end;
+$$;
+
+revoke all on function public.transfer_ownership(uuid) from public, anon;
+grant execute on function public.transfer_ownership(uuid) to authenticated;
 revoke all on function public.seed_organization_leave_types(uuid) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -593,7 +777,7 @@ revoke all on function public.seed_organization_leave_types(uuid) from public, a
 --   the company passed in the invite's organization_id, as an employee; the
 --   invite flow then sets the role and details.
 -- * Self sign-up with a company_name in the sign-up metadata: creates that
---   company and becomes its admin.
+--   company and becomes its owner.
 -- * Anything else gets no employee row, so the app signs the user out. A
 --   sign-up can never join an existing company by itself.
 
@@ -632,7 +816,7 @@ begin
     returning id into org;
     perform public.seed_organization_leave_types(org);
     insert into public.employees (id, organization_id, full_name, email, role)
-    values (new.id, org, display_name, new.email, 'admin')
+    values (new.id, org, display_name, new.email, 'owner')
     on conflict (id) do nothing;
   end if;
   return new;

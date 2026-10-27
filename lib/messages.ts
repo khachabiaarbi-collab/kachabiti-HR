@@ -28,6 +28,19 @@ export const en = {
   "role.employee": "Employee",
   "role.manager": "Manager",
   "role.administrator": "Administrator",
+  "role.owner": "Owner",
+  "role.hr": "HR",
+  "roles.notAllowed": "You cannot give or change this role.",
+  "roles.ownerTransferOnly": "The owner role only changes by transferring ownership.",
+  "roles.ownerActive": "The owner always stays active.",
+  "roles.newOwnerAdmin": "Ownership can only go to an active administrator.",
+  "roles.roleLocked": "Only the owner changes administrators; admins give the HR, manager and employee roles.",
+  "roles.makeOwner": "Make owner",
+  "roles.transferHint": "Hand the company to {name}. You become an administrator.",
+  "roles.transferTitle": "Transfer ownership?",
+  "roles.transferBody":
+    "{name} becomes the owner of the company and you become an administrator. Only the new owner can undo this.",
+  "roles.readOnlyPanel": "Read only: HR and administrators edit employee records.",
   "role.admin": "Admin",
   "department.unassigned": "Unassigned",
   "common.cancel": "Cancel",
@@ -435,12 +448,18 @@ export const en = {
   "admin.rolesHint": "What each role can open",
   "admin.rolesIntro":
     "A person’s role is set on their employee record. It decides which screens they see.",
+  "admin.roleOwnerTitle": "Owner",
+  "admin.roleOwnerBody":
+    "Everything an administrator can do. Makes administrators and hands ownership to one of them. Cannot be removed.",
   "admin.roleAdminTitle": "Administrator",
   "admin.roleAdminBody":
-    "Opens every screen, including payroll, people, and these settings.",
+    "Opens every screen, including the company profile. Gives the HR, manager and employee roles.",
+  "admin.roleHrTitle": "HR",
+  "admin.roleHrBody":
+    "People, balances, leave policy, attendance settings, every approval and payroll.",
   "admin.roleManagerTitle": "Manager",
   "admin.roleManagerBody":
-    "Reviews team leave and attendance. Payroll stays with administrators.",
+    "Approves leave, authorizations and attendance for the departments they manage. No payroll.",
   "admin.roleEmployeeTitle": "Employee",
   "admin.roleEmployeeBody":
     "Requests leave, punches in, and sees their own balance and payslips.",
@@ -1131,6 +1150,19 @@ export const fr: Record<keyof typeof en, string> = {
   "role.employee": "Employé",
   "role.manager": "Manager",
   "role.administrator": "Administrateur",
+  "role.owner": "Propriétaire",
+  "role.hr": "RH",
+  "roles.notAllowed": "Vous ne pouvez pas donner ou modifier ce rôle.",
+  "roles.ownerTransferOnly": "Le rôle de propriétaire ne change que par transfert de propriété.",
+  "roles.ownerActive": "Le propriétaire reste toujours actif.",
+  "roles.newOwnerAdmin": "La propriété ne peut aller qu’à un administrateur actif.",
+  "roles.roleLocked": "Seul le propriétaire modifie les administrateurs ; les administrateurs donnent les rôles RH, manager et employé.",
+  "roles.makeOwner": "Nommer propriétaire",
+  "roles.transferHint": "Confier l’entreprise à {name}. Vous devenez administrateur.",
+  "roles.transferTitle": "Transférer la propriété ?",
+  "roles.transferBody":
+    "{name} devient propriétaire de l’entreprise et vous devenez administrateur. Seul le nouveau propriétaire peut annuler.",
+  "roles.readOnlyPanel": "Lecture seule : les RH et les administrateurs modifient les fiches.",
   "role.admin": "Admin",
   "department.unassigned": "Non assigné",
   "common.cancel": "Annuler",
@@ -1540,12 +1572,18 @@ export const fr: Record<keyof typeof en, string> = {
   "admin.rolesHint": "Ce que chaque rôle peut ouvrir",
   "admin.rolesIntro":
     "Le rôle se choisit sur la fiche de l’employé. Il décide des écrans visibles.",
+  "admin.roleOwnerTitle": "Propriétaire",
+  "admin.roleOwnerBody":
+    "Tout ce que fait un administrateur. Nomme les administrateurs et peut transmettre la propriété à l’un d’eux. Ne peut pas être retiré.",
   "admin.roleAdminTitle": "Administrateur",
   "admin.roleAdminBody":
-    "Ouvre tous les écrans, y compris la paie, les personnes et ces paramètres.",
+    "Ouvre tous les écrans, y compris le profil de l’entreprise. Donne les rôles RH, manager et employé.",
+  "admin.roleHrTitle": "RH",
+  "admin.roleHrBody":
+    "Personnes, soldes, politique de congés, paramètres de présence, toutes les validations et la paie.",
   "admin.roleManagerTitle": "Manager",
   "admin.roleManagerBody":
-    "Valide les congés et la présence de l’équipe. La paie reste réservée aux administrateurs.",
+    "Valide les congés, autorisations et présences des départements qu’il gère. Pas de paie.",
   "admin.roleEmployeeTitle": "Employé",
   "admin.roleEmployeeBody":
     "Demande des congés, pointe, et consulte son solde et ses fiches de paie.",

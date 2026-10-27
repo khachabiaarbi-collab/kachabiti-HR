@@ -4,10 +4,8 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { openingDaysForLeaveType, parseMonthlyLeaveDays, toDbRole } from "@/lib/map-rows";
+import { assignableRoles, isHrRole, normalizeRole } from "@/lib/roles";
 
-function isStaff(role: string | null | undefined) {
-  return role === "admin" || role === "manager";
-}
 
 function firstHeader(headerList: Headers, name: string) {
   return headerList.get(name)?.split(",")[0]?.trim() ?? "";
@@ -73,7 +71,7 @@ export async function inviteEmployee(input: {
     .select("id, role, organization_id")
     .eq("id", user.id)
     .maybeSingle();
-  if (!employee || !isStaff(employee.role)) {
+  if (!employee || !isHrRole(employee.role)) {
     return "Not allowed";
   }
 
@@ -102,7 +100,11 @@ export async function inviteEmployee(input: {
   const monthlyLeaveDays = parseMonthlyLeaveDays(
     input.monthlyLeaveDays.trim() ? input.monthlyLeaveDays : companyRate,
   );
-  const role = toDbRole(input.role);
+  const role = normalizeRole(toDbRole(input.role));
+  // HR invites employees; admins also hr and managers; the owner also admins.
+  if (role !== "employee" && !assignableRoles(employee.role).includes(role)) {
+    return "You cannot give this role";
+  }
 
   // Read with the inviter's client: RLS only shows their own company.
   if (departmentId) {
